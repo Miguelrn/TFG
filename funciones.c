@@ -228,13 +228,13 @@ float *lectura_archivo(char *ruta, int *muestras, int *lineas, int *bandas, char
 			token = strtok(NULL, "=");
 			if(DEBUG) printf("%s.\n",token);
 			*lineas = atoi(token);
-			if(DEBUG) printf("%d\n", lineas);
+			//if(DEBUG) printf("%d\n", lineas);
 
 		}else if((strcmp(token,"bands   ") == 0) || (strcmp(token,"bands ") == 0)){
 			token = strtok(NULL, "=");
-			if(DEBUG) printf("%s.\n",token);
+			//if(DEBUG) printf("%s.\n",token);
 			*bandas = atoi(token);
-			if(DEBUG) printf("%d\n", bandas);
+			//if(DEBUG) printf("%d\n", bandas);
 
 		}else if((strcmp(token,"data type ") == 0) || (strcmp(token,"data type ") == 0)){
 			token = strtok(NULL, "=");
@@ -276,10 +276,14 @@ float *lectura_archivo(char *ruta, int *muestras, int *lineas, int *bandas, char
 
 
 	imagen = (float*)malloc((*muestras) * (*lineas) * (*bandas) * sizeof(float));
-	char 		*imagenAux_char;
-	short int 	*imagenAux_short_int;
-	int 		*imagenAux_int;
-	//long float 	*imagenAux_long_float;
+	char 				*imagenAux_char;
+	short int 			*imagenAux_short_int;
+	int 				*imagenAux_int;
+	double	 			*imagenAux_double;
+	unsigned short int	*imagenAux_uShort;
+	unsigned int		*imagenAux_uInt;
+	long int			*imagenAux_longInt;
+	unsigned long int	*imagenAux_uLongInt;
 
 	switch(datatype){
 		case 1: //byte8 -> char
@@ -309,18 +313,46 @@ float *lectura_archivo(char *ruta, int *muestras, int *lineas, int *bandas, char
 				tam = fread(imagen, sizeof(float), (*muestras) * (*lineas) * (*bandas), fd);
         		if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
 				break;
-		/*case 5: //float64 -> long float
-				imagenAux_int = (long float*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(long float));
-				tam = fread(imagenAux_long_float, sizeof(long float), (*muestras) * (*lineas) * (*bandas), fd);
-				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_long_float[i];
-        		if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
-        		free(imagenAux_long_float);
-				break;*/
+		case 5: //float64 -> double
+				imagenAux_double = (double*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(double));
+				tam = fread(imagenAux_double, sizeof(double), (*muestras) * (*lineas) * (*bandas), fd);
+				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_double[i];
+        		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
+        		free(imagenAux_double);
+				break;
+		case 12: 
+				imagenAux_uShort = (unsigned short int*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(unsigned short int));
+				tam = fread(imagenAux_uShort, sizeof(unsigned short int), (*muestras) * (*lineas) * (*bandas), fd);
+				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_uShort[i];
+        		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
+        		free(imagenAux_uShort);
+				break;
+		case 13: 
+				imagenAux_uInt = (unsigned int*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(unsigned int));
+				tam = fread(imagenAux_uInt, sizeof(unsigned int), (*muestras) * (*lineas) * (*bandas), fd);
+				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_uInt[i];
+        		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
+        		free(imagenAux_uInt);
+				break;
+		case 14: 
+				imagenAux_longInt = (long int*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(long int));
+				tam = fread(imagenAux_longInt, sizeof(long int), (*muestras) * (*lineas) * (*bandas), fd);
+				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_longInt[i];
+        		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
+        		free(imagenAux_longInt);
+				break;
+		case 15: 
+				imagenAux_uLongInt = (unsigned long int*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(unsigned long int));
+				tam = fread(imagenAux_uLongInt, sizeof(unsigned long int), (*muestras) * (*lineas) * (*bandas), fd);
+				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_uLongInt[i];
+        		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
+        		free(imagenAux_uLongInt);
+				break;
 
 	}         
 
 	if(tam == 0 || tam != ((*muestras) * (*lineas) * (*bandas))){
-		printf("Error en la lectura del archivo, tam leido: %d\n", tam);
+		printf("Error en la lectura del archivo, tam leido: \n");
 		exit(1);
 	}
 	
