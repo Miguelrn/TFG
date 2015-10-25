@@ -110,14 +110,18 @@ if((idx*muestras + jdx) < muestras*lineas){//por si acaso se sale...
 		float jointpoint[19*19+19+20] = {};
 		creaMatriz(endmember, idx , jdx, ImageIn, n, muestras, lineas, jointpoint);
 
-if(idx == 0 && jdx == 0 && n == 1){//vamos a copiar la matriz para comprobar que la hace bien
-		for(a = 0; a < (n+1)*(n+1); a++) mierda[a] = jointpoint[a];
+if(idx == 0 && jdx == 0 && n == 1 && primeraVuelta){//lo hace bien, pero salta muchos core dumps ¿??¿
+		//for(a = 0; a < (n+1)*(n+1); a++) mierda[a] = jointpoint[a];
 }
 		volumen[idx*muestras + jdx] = calculaVolumen(jointpoint, n+1);//se calcula sobre una matriz (n+1)*(n+1)
    
 
 		barrier(CLK_GLOBAL_MEM_FENCE);//esperamos a que todos los hilos calculen el volumen
-		if(idx == 0 && jdx == 0){//REDUCE (sin hacer aun)
+if(idx == 0 && jdx == 0 && n == 1 && primeraVuelta){
+		for(a = 0; a < (n+1)*(n+1); a++) mierda[a] = volumen[a];//el hilo maestro no tiene acceso a todos los volumenes ?????
+}
+
+		/*if(idx == 0 && jdx == 0){//REDUCE (sin hacer aun)
 			for(i = 0; i < muestras; i++){
 				for(j = 0; j < lineas; j++){
 					if(volumen[i*muestras+j] > maxVolumen){
@@ -141,7 +145,7 @@ if(idx == 0 && jdx == 0 && n == 1){//vamos a copiar la matriz para comprobar que
 		}else if (primeraVuelta){//modifical una variable local el resto de hilos tienen la suya propia??
 			n = 1;
 			primeraVuelta--;
-		}else n++;
+		}else */n++;
 		
 
 	}//fin del while	
