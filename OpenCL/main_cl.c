@@ -404,7 +404,7 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	cl_mem volumen;
 	cl_mem mierda;//<---------------------------------------------------------------------------
 	float *mierda_cpu;
-	mierda_cpu = (float*) malloc((num_endmembers+1)*(num_endmembers+1)*sizeof(float));
+	mierda_cpu = (float*) malloc(muestras*lineas*sizeof(float));
 
 	// OpenCL host variables
 	cl_uint num_devs_returned;
@@ -539,7 +539,7 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 
 	volumen = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(float) * muestras * lineas, NULL, NULL);
 
-	mierda = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(float) * (num_endmembers+1)* (num_endmembers+1) , NULL, NULL);
+	mierda = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(float) * muestras * lineas , NULL, NULL);
 
 	if (!ImageIn || !posiciones || !volumen){
         	printf("Error: Failed to allocate device memory!\n");
