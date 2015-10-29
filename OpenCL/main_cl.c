@@ -318,7 +318,7 @@ float *lectura_archivo(char *ruta, int *muestras, int *lineas, int *bandas, char
 				tam = fread(imagen, sizeof(float), (*muestras) * (*lineas) * (*bandas), fd);
         		//if(DEBUG) for(i = 0; i < *muestras; i++) printf("%f - ",imagen[i]);
 				break;
-		case 5: //float64 -> long float
+		case 5: //float64 -> long float (float64)
 				imagenAux_double = (double*) malloc ((*muestras) * (*lineas) * (*bandas) * sizeof(double));
 				tam = fread(imagenAux_double, sizeof(double), (*muestras) * (*lineas) * (*bandas), fd);
 				for(i = 0; i < (*muestras) * (*lineas) * (*bandas); i++) imagen[i] = (float)imagenAux_double[i];
