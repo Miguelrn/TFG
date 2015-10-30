@@ -11,6 +11,8 @@ LIBS = -lm
 
 SOURCEDIR = .
 
+CFLAGS := -O3 
+
 $(EXE) :$(OBJS) 
 	$(CC) $(CFLAGS)  -o $@ $? $(LIBS)
 
