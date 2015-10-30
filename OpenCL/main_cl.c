@@ -619,13 +619,13 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	}
 
 	// read the output back to host memory
-	err = clEnqueueReadBuffer( commands, mierda, CL_TRUE, 0, sizeof(float) * (num_endmembers+1) * (num_endmembers+1), mierda_cpu, 0, NULL, NULL );
+	err = clEnqueueReadBuffer( commands, mierda, CL_TRUE, 0, sizeof(float) * muestras * lineas, mierda_cpu, 0, NULL, NULL );
 	if (err != CL_SUCCESS)
 	{	
 		printf("Error enqueuing read buffer command. Error Code=%d\n",err);
 		exit(1);
 	}
-for(i=0;i< 4;i++) printf("%f ",mierda_cpu[i]);
+for(i=0;i< 16;i++) printf("%f ",mierda_cpu[i]);
 	
 	printf("\n\nEndmember Host-Device tHost=%f (s.)\n", (t1d-t0d)/1000000);
 //for(i = 0; i < num_endmembers; i++) printf("%d - %d\n",solu[2*i],solu[2*i+1]);	

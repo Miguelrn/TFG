@@ -41,7 +41,7 @@ int main(int argc, char **argv) {
 	if(DEBUG) printf("Ha tardado en ejecutarse: %f \n", t1-t0);
 
 	for(i = 0; i < endmember; i++ ){
-		printf("%d: %d - %d\n",i,solucion[i].columnas,solucion[i].filas);//cuprite -> (298,194)(39,208)(298,206)(297,193)(63,162)
+		printf("%d: %d - %d\n",i+1,solucion[i].columnas,solucion[i].filas);//cuprite -> (298,194)(39,208)(298,206)(297,193)(63,162)
 	}
 
 
