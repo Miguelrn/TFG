@@ -5,7 +5,7 @@
 
 
 
-pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int bandas, int deviceSelected, float *endmember_bandas, double treadImage, size_t localSize){
+pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int bandas, int deviceSelected, float *endmember_bandas, size_t localSize){
 
 	pos *solucion = (pos*) malloc((num_endmembers)*sizeof(pos));
 	int i,j;
@@ -52,7 +52,7 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	filelen = ftell(fp);
 	rewind(fp);
 
-	kernel_src = malloc(sizeof(char)*(filelen+1));
+	kernel_src = (char*) malloc(sizeof(char)*(filelen+1));
 	readlen = fread(kernel_src,1,filelen,fp);
 	if(readlen!= filelen)
 	{
@@ -140,7 +140,7 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 
 	if(!ok){
 		printf("Selected device not found. Program will terminate\n");
-		return 1;
+		exit(-1);
 	}	
 	
 	t0d = get_time();	
@@ -304,11 +304,11 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	read+=(end-start)*1.0e-9;
 
 	tRamDevice = (t_device-t_ram);
-	printf("\nTotal INIT:	\t%.3f (seconds)\n", (t1d-t0d)+treadImage-(tRamDevice));	
+	printf("\nTotal INIT:	\t%.3f (seconds)\n", (t1d-t0d)-(tRamDevice));	
 	tTotal = tRamDevice + k_endmember + k_reduce + k_extrae + read + write;
 	printf("\nTotal SGA:	\t%.3f (seconds)\n RAM->Device: \t%.3f\t(%.1f%) \n endmember: \t%.3f\t(%.1f%) \n reduce: \t%.3f\t(%.1f%)\n", tTotal, tRamDevice, (tRamDevice*100)/tTotal, k_endmember, (k_endmember*100)/tTotal, k_reduce, (k_reduce*100)/tTotal);
 	printf(" extract: \t%.3f\t(%.1f%)\n write: \t%.3f\t(%.1f%)\n read: \t\t%.3f\t(%.1f%)\n", k_extrae, (k_extrae*100)/tTotal, write, (write*100)/tTotal, read, (read/100)/tTotal);
-	printf("\nTotal TIME:	\t%.3f (seconds)\n\n", (t1d-t0d)+ treadImage -(tRamDevice) + tTotal);
+	printf("\nTotal TIME:	\t%.3f (seconds)\n\n", (t1d-t0d) -(tRamDevice) + tTotal);
 	
 	for(i = 0;i < num_endmembers; i++){
 		solucion[i].filas = solu[i*2]; 
@@ -329,6 +329,24 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	free(solu);//comprobar si falta algun free mas !1
 
 	return solucion;
+}
+
+double get_time(){
+	static struct timeval tv0;
+	double time_, time;
+
+	gettimeofday(&tv0,(struct timezone*)0);
+	time_=(double)((tv0.tv_usec + (tv0.tv_sec)*1000000));
+	time = time_/1000000;
+	return(time);
+}
+
+void exitOnFail(cl_int status, const char* message){
+	if (CL_SUCCESS != status){
+		printf("error: %s\n", message);
+		printf("error: %d\n", status);
+		exit(-1);
+	}
 }
 
 

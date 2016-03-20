@@ -6,6 +6,7 @@
 #include <CL/cl.h>
 #include <math.h>
 
+#include "ReadWrite.h"
 //#include "gene.h"
 #include "sga.h"
 #include "lsu.h"
@@ -37,7 +38,7 @@ int main(int argc, char **argv) {
 	localSize = atoi(argv[2]);
 	deviceSelected = atoi(argv[3]);
 	librarySelected = atoi(argv[4]);
-	if(librarySelected != 1 || librarySelected != 2){
+	if(librarySelected != 1 && librarySelected != 2){
 		printf("Library selected is not found, use 1 for ViennaCl or 2 for ClMagma\n");
 		exit(-1);
 	}
@@ -71,10 +72,10 @@ printf("ojo hasta que no este gene completo se calculara 19 endmembers!!\n");
 	
 	/*LSU*/
 	t0 = get_time();
-	if(librarySelected == 1)
-		lsu_gpu_v(imagen, endmember_bandas, deviceSelected, bands, num_endmembers, lines, samples);
-	//else if(librarySelected == 2)
-	//	lsu_gpu_m(float *imagen, float *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples);
+	if(librarySelected == 1)//ViennaCl
+		lsu_gpu_v(imagen, endmember_bandas, deviceSelected, bands, endmember, lines, samples, argv[1]);
+	//else if(librarySelected == 2)//ClMagma
+	//	lsu_gpu_m(imagen, endmember_bandas, deviceSelected, bands, endmember, lines, samples, argv[1]);
 	t1 = get_time();
 
 

@@ -177,13 +177,23 @@ void writeHeader(const char* outHeader, int samples, int lines, int bands){
     // open the file
     FILE *fp=fopen(outHeader,"w+");
     fseek(fp,0L,SEEK_SET);
-    fprintf(fp,"ENVI\ndescription = {\nExported from MATLAB}\n");
+    fprintf(fp,"ENVI\ndescription = {\nExported from OpenCL}\n");
     fprintf(fp,"samples = %d", samples);
     fprintf(fp,"\nlines   = %d", lines);
     fprintf(fp,"\nbands   = %d", bands);
     fprintf(fp,"\ndata type = 5");
     fprintf(fp,"\ninterleave = bsq");
     fclose(fp);
+}
+
+double get_time(){
+	static struct timeval tv0;
+	double time_, time;
+
+	gettimeofday(&tv0,(struct timezone*)0);
+	time_=(double)((tv0.tv_usec + (tv0.tv_sec)*1000000));
+	time = time_/1000000;
+	return(time);
 }
 
 
