@@ -63,7 +63,7 @@ int main(int argc, char **argv) {
 
 
 	/*GENE*/
-printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
+printf("ojo hasta que no este gene completo se calculara 19 endmembers!!\n");
 	
 	/*SGA*/
 	float *endmember_bandas = (float*) calloc(bands*endmember, sizeof(float));

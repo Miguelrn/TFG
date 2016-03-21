@@ -146,10 +146,10 @@ void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int 
   and number of bands "num_bands".
   This method does not write the header file .hdr, only the image file.
 */
-void writeResult( float *imagen, const char* resultado_filename, int num_samples, int num_lines, int num_bands){
+void writeResult( double *imagen, const char* resultado_filename, int num_samples, int num_lines, int num_bands){
     FILE *fp;
     int i, j, np=num_samples*num_lines;
-    double* imagent = (double*)malloc(num_bands*np*sizeof(double) ); 
+    //double* imagent = (double*)malloc(num_bands*np*sizeof(double) ); 
 
     //open file "resultado_filename"
     if ((fp=fopen(resultado_filename,"wb"))!=NULL)
@@ -164,9 +164,10 @@ void writeResult( float *imagen, const char* resultado_filename, int num_samples
 	//	  	fflush(stdout);
  	//	}
 	//write the image
-	for ( i = 0; i < np*num_bands; i++)
-		imagent[i] = (double)imagen[i];				
-     	fwrite(imagent,1,(num_lines * num_samples * num_bands * sizeof(double)),fp);
+	/*for ( i = 0; i < np*num_bands; i++)
+		imagent[i] = (double)imagen[i];	*/			
+     	fwrite(imagen,1,(num_lines * num_samples * num_bands * sizeof(double)),fp);
+	printf("File with endmembers saved at: %s\n",resultado_filename);
     }
     //close the file
     fclose(fp);
@@ -195,6 +196,14 @@ double get_time(){
 	time = time_/1000000;
 	return(time);
 }
+
+/*void exitOnFail(cl_int status, const char* message){
+	if (CL_SUCCESS != status){
+		printf("error: %s\n", message);
+		printf("error: %d\n", status);
+		exit(-1);
+	}
+}*/
 
 
 

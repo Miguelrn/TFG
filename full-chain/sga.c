@@ -5,7 +5,14 @@
 
 
 
-pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int bandas, int deviceSelected, float *endmember_bandas, size_t localSize){
+pos *sga_gpu(   float *imagen,
+		int num_endmembers,
+		int muestras, 
+		int lineas, 
+		int bandas, 
+		int deviceSelected, 
+		float *endmember_bandas, 
+		size_t localSize){
 
 	pos *solucion = (pos*) malloc((num_endmembers)*sizeof(pos));
 	int i,j;
@@ -331,7 +338,6 @@ pos *sga_gpu(float *imagen, int num_endmembers, int muestras, int lineas, int ba
 	return solucion;
 }
 
-
 void exitOnFail(cl_int status, const char* message){
 	if (CL_SUCCESS != status){
 		printf("error: %s\n", message);
@@ -339,6 +345,9 @@ void exitOnFail(cl_int status, const char* message){
 		exit(-1);
 	}
 }
+
+
+
 
 
 

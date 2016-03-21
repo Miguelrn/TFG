@@ -7,8 +7,8 @@
 #include <time.h>
 #include <sys/time.h>
 #include <string.h>
-#include <CL/cl.h>
 #include <math.h>
+#include <CL/cl.h>
 #include "ReadWrite.h" 
 
 
