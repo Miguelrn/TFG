@@ -57,10 +57,10 @@ if ( MAGMA_SUCCESS !=                                                  \
 }
 
 //lsu whit ViennaCl
-void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
+void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
 
 //lsu whit Clmagma
-void lsu_gpu_m(float *imagen, float *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
+void lsu_gpu_m(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
 
 void exitOnFail2(cl_int status, const char* message);
 

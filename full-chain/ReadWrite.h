@@ -23,7 +23,7 @@
 
 void cleanString(char *cadena, char *out);
 void readHeader(char* filename, int *Samples, int *Lines, int *numBands, int *dataType);
-void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int numBands, int dataType);
+void Load_Image(char* filename, double *imageVector, int Samples, int Lines, int numBands, int dataType);
 void writeResult(double *imagen, const char* resultado_filename, int num_samples, int num_lines, int num_bands);
 void writeHeader(const char* outHeader, int samples, int lines, int bands);
 double get_time();

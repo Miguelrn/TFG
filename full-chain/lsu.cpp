@@ -1,8 +1,6 @@
 #include "lsu.h"
 
-
-
-
+//void exitOnFail(cl_int status, const char* message);
 
 int writeResult(boost::numeric::ublas::matrix<double> image, const char* filename, int lines, int samples, int bands, int dataType, char* interleave){
 
@@ -66,7 +64,7 @@ int writeResult(boost::numeric::ublas::matrix<double> image, const char* filenam
 			case 0:
 				for(i=0; i<lines*samples; i++)
 					for(j=0; j<bands; j++)
-						imageF[i+j*samples*lines] = (short int)image(i,j);
+						imageF[i+j*samples*lines] = (float)image(i,j);
 				break;
 
 			/*case 1:
@@ -101,7 +99,7 @@ int writeResult(boost::numeric::ublas::matrix<double> image, const char* filenam
 			case 0:
 				for(i=0; i<lines*samples; i++)
 					for(j=0; j<bands; j++)
-						imageD[i+j*samples*lines] = (short int)image(i,j);
+						imageD[i+j*samples*lines] = image(i,j);
 				break;
 
 			/*case 1:
@@ -117,7 +115,7 @@ int writeResult(boost::numeric::ublas::matrix<double> image, const char* filenam
 							imageD[i*bands*samples + (j*samples + k)] = image[j*lines*samples + (i*samples + k)];
 				break;*/
         	}
-
+//for(int i = 0; i < bands; i++) printf("%f ",imageD[i*lines*samples+100]);
 		FILE *fp;
     		if ((fp=fopen(filename,"wb"))!=NULL){
         		fseek(fp,0L,SEEK_SET);
@@ -136,22 +134,23 @@ int writeResult(boost::numeric::ublas::matrix<double> image, const char* filenam
 
 
 
-void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename){
-	
+void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename){
+
 	int i, j, one = 1;
 	int sampleLines = lines * samples;
 	boost::numeric::ublas::matrix<double> imagen_Host(sampleLines, bandas);
 	boost::numeric::ublas::matrix<double> endmember_Host(targets, bandas);
 	for(i = 0; i < sampleLines; i++)
 		for(j=0; j<bandas; j++)
-			imagen_Host(i,j) = imagen[i + lines*samples*j];
+			imagen_Host(i,j) = imagen[i + j*sampleLines];
 
 	for(i = 0; i < targets; i++)
-		for(j=0; j<bandas; j++)
+		for(j=0; j<bandas; j++){
 			endmember_Host(i,j) = endmembers[i + targets*j];
-
+		}
 	double start = get_time();
-
+//for(i = 0; i < bandas; i++) printf("%f ",imagen_Host(0,i));//tiene lo que necesito que tenga!
+//for(i = 0; i < bandas; i++) printf("%f ",endmember_Host(0,i));
 
 	viennacl::ocl::context();
 	if(DeviceSelected == 0){
@@ -165,7 +164,7 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 		printf("Can't find platform selected. Terminating...");
 		exit(-1);
 	}
-	
+
 
 	std::cout << viennacl::ocl::current_device().info() << std::endl;
 	viennacl::context ctx(viennacl::ocl::get_context(0));
@@ -185,10 +184,12 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	boost::numeric::ublas::vector<double> AUX2_Host(targets);
 	boost::numeric::ublas::matrix<double> I_Host(targets, targets);
 	boost::numeric::ublas::vector<double> PIXEL_Host(bandas);
+	//boost::numeric::ublas::matrix<double> B_Host(bandas, targets);
+	//boost::numeric::ublas::matrix<double> B_aux_Host(targets, bandas);
 	double Y_Host;
 
     	//Device
-	viennacl::matrix<double, viennacl::column_major> endmember_Device(targets, bandas, ctx);
+	viennacl::matrix<double> endmember_Device(targets, bandas);
     	viennacl::matrix<double> EtE_Device(targets, targets);
 	viennacl::vector<double> ONE_Device = viennacl::scalar_vector<double>(targets, 1);
     	viennacl::vector<double> AUX_Device(targets);
@@ -198,11 +199,12 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	viennacl::matrix<double> A_Device(targets, targets);
 	viennacl::matrix<double> B_Device(bandas, targets);
 	viennacl::vector<double> PIXEL_Device(bandas);
-
-
+	//viennacl::matrix<double> B_aux_Device(targets, bandas);
+	//viennacl::matrix<double> endmember_trans_Device(targets, bandas);
 
 	printf("---\n");
-	//std::cout << endmember_Host << std::endl;
+
+//std::cout << endmember_Host << std::endl;
 
 	double t0 = timer.get();
 	viennacl::copy(endmember_Host, endmember_Device);
@@ -210,9 +212,11 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	printf("Tiempo EtE(transfer->device): %f \n", t1-t0);
 
 	t0 = timer.get();
-	EtE_Device = viennacl::linalg::prod(endmember_Device, viennacl::trans(endmember_Device));//esta multiplicacion era column major, es row major(posible error)
+	EtE_Device = viennacl::linalg::prod(endmember_Device, viennacl::trans(endmember_Device));
 	t1 = timer.get();
 	printf("Tiempo EtE(prod): %f \n", t1-t0);
+
+//std::cout << EtE_Device << std::endl;
 
 	t0 = timer.get();
 	viennacl::copy(EtE_Device, EtE_Host_aux);
@@ -220,18 +224,32 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	printf("Tiempo EtE(transfer->host): %f \n", t1-t0);
 
 
-	t0 = timer.get();
+	/*t0 = timer.get();
 	boost::numeric::ublas::lu_factorize(EtE_Host_aux, permutation_Host);
 	boost::numeric::ublas::lu_substitute(EtE_Host_aux, permutation_Host, EtE_Host);
 	t1 = timer.get();
-	printf("Tiempo EtE(lu): %f \n", t1-t0);
+	printf("Tiempo EtE(lu): %f \n", t1-t0);*///esta inversa no calcula bien el resultado....
 
+	t0 = timer.get();
+	double *EtE_Host_blas = (double*) calloc (targets*targets,sizeof(double));
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ EtE_Host_blas[i*targets+j] = EtE_Host_aux(i,j); /*printf("%f ",EtE_Host_blas[i*targets+j]);*/} //printf("\n");
+	int *ipiv = (int*)malloc(targets*sizeof(int));
+	int info;
+	int lwork = targets;
+	double *work = (double*)malloc(lwork*sizeof(double));
+	dgetrf_(&targets,&targets,EtE_Host_blas,&targets,ipiv, &info);
+	dgetri_(&targets, EtE_Host_blas, &targets, ipiv,work, &lwork, &info);
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ EtE_Host(i,j) = EtE_Host_blas[i*targets+j]; /*printf("%f ",EtE_Host_blas[i*targets+j]);*/} //printf("\n");
+
+	t1 = timer.get();
+	printf("Tiempo Lu-factorize: %f \n", t1-t0);
 
 	t0 = timer.get();
 	viennacl::copy(EtE_Host, EtE_Device);
 	t1 = timer.get();
 	printf("Tiempo EtE(transfer->device): %f \n-------\n", t1-t0);
-
+//std::cout << "EtE_Device" <<  EtE_Device << std::endl; 
+//for(i=0;i<targets;i++)for(j=0;j<targets;j++)printf("%f ",EtE_Host(i,j));printf(" \n");
 
 	//esta prueba es para hacerlo todo en serie y mandarlo a device ya calculado
 /* 	t0 = timer.get();//esta solo es una prueba de tiempos, por si fuera mejor hacerlo todo con ublas -> NO LO ES!!
@@ -250,36 +268,36 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 
 	printf("Tiempo 2: %f \n", t3-t0);//Tiempo 2: 0.008230
 */
-	
+
 	//EtE_Device = viennacl::scalar_matrix<double>(targets, targets, 2);
 	t0 = timer.get();
 	AUX_Device = viennacl::linalg::prod(EtE_Device, ONE_Device);//Et_E
 	t1 = timer.get();
 	printf("Tiempo Aux_device: %f \n", t1-t0);
-
+//std::cout << AUX_Device << std::endl;
 	t0 = timer.get();
 	Y_Device = viennacl::linalg::sum(AUX_Device);
 	t1 = timer.get();
 	printf("Tiempo Y_device(reduction): %f \n", t1-t0);
 	Y_Device = 1 / Y_Device;
-	Y_Host = Y_Device; 
-	//printf("valor Y_Host: %f\n",Y_Host);
+	Y_Host = Y_Device;
+//printf("valor Y_Host: %f\n",Y_Host);
 	t0 = timer.get();
 	AUX_Device = viennacl::scalar_vector<double>(targets, Y_Device);
 	t1 = timer.get();
 	printf("Tiempo AUX_Device(init): %f \n-------\n", t1-t0);
-	
+
 	t0 = timer.get();
 	AUX2_Device = viennacl::linalg::prod(EtE_Device, AUX_Device);
 	t1 = timer.get();
 	printf("Tiempo AUX_Device(prod): %f \n", t1-t0);
-	
+//std::cout << AUX2_Device << std::endl;
 
 	t0 = timer.get();
 	viennacl::copy(AUX2_Device, AUX2_Host);//me interesa mas traermelo al completo, modificarlo y volverlo a llevar
 	t1 = timer.get();
 	printf("Tiempo copy Device->Host(aux2): %f \n", t1-t0);
-	
+
 	t0 = timer.get();
 	for(i=0; i<targets; i++)
 		for(j=0; j<targets; j++)
@@ -294,68 +312,78 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	viennacl::copy(I_Host, I_Device);
 	t1 = timer.get();
 	printf("Tiempo host->device(I): %f \n", t1-t0);
-
+//std::cout << I_Device << std::endl;
 
 	t0 = timer.get();
-	A_Device = viennacl::linalg::prod(I_Device, EtE_Device);
+	A_Device = viennacl::linalg::prod(viennacl::trans(I_Device), viennacl::trans(EtE_Device));
 	t1 = timer.get();
 	printf("Tiempo A_Device: %f \n", t1-t0);
-	
+
+//std::cout << A_Device << std::endl;
 	//A_Device = viennacl::identity_matrix<double>(targets);//---
 
 	t0 = timer.get();
-	B_Device = viennacl::linalg::prod(viennacl::trans(endmember_Device),A_Device);//ojo que esta alreves 188*19
+	B_Device = viennacl::linalg::prod(viennacl::trans(endmember_Device),A_Device/*A_Device, endmember_Device*/);//ojo que esta alreves 188*19
 	t1 = timer.get();
-	printf("Tiempo B_Device: %f \n", t1-t0);//hacer la transpuesta tarda mucho, alternativas 
+//	viennacl::copy(B_Device, B_Host);
+/*	double *B_major = (double*) malloc(targets*bandas*sizeof(double));
+	for(i = 0; i < bandas; i++) for(j = 0; j < targets; j++) B_major[i*targets+j] = B_Host(i,j);
+//for(i = 0; i < targets*bandas; i++) printf("%f ",B_major[i]);printf("\n");
+	for(i = 0; i < targets; i++) for(j = 0; j < bandas; j++) B_aux_Host(i,j) = B_major[i*targets+j];
+	viennacl::copy(B_aux_Host, B_aux_Device);
+*/
+	printf("Tiempo B_Device: %f \n", t1-t0);
+//std::cout << B_aux_Device << std::endl;
+
 
 	t0 = timer.get();
 	AUX_Device = viennacl::linalg::prod(EtE_Device, ONE_Device);
 	t1 = timer.get();
 	printf("Tiempo AUX_Device(prod): %f \n", t1-t0);
+//std::cout << AUX_Device << std::endl;
 
 	t0 = timer.get();
 	AUX_Device = Y_Device * AUX_Device;
 	t1 = timer.get();
 	printf("Tiempo Aux_Device (AUX_Device * Y_Device): %f \n", t1-t0);
-
-
+//std::cout << AUX_Device << std::endl;
 
 
 	t0 = timer.get();
 	viennacl::copy(AUX_Device, AUX_Host);
 	t1 = timer.get();
 	printf("Tiempo Aux_Device(transfer): %f \n", t1-t0);
-	
-	t0 = timer.get(); 
+
+
+	t0 = timer.get();
 	for(i = 0; i < lines*samples; i++){
 		//PIXEL_Device = viennacl::row(imagen_Device,i);//es muy lenta esta operacion
-		for(j = 0; j < bandas; j++) PIXEL_Host(j) = imagen_Host(i,j);
+		for(j = 0; j < bandas; j++){ PIXEL_Host(j) = imagen_Host(i,j); /*if(i == 0) printf("%f ",PIXEL_Host(j));*/}
 		viennacl::copy(PIXEL_Host, PIXEL_Device);
 
 		AUX2_Device = viennacl::linalg::prod(viennacl::trans(B_Device), PIXEL_Device);//B * Pixel
-
 		AUX2_Device = AUX2_Device + AUX_Device;
-	
+
 		viennacl::copy(AUX2_Device, AUX2_Host);
 
-		for(j = 0; j < targets; j++) imagen_Host(i,j) = AUX2_Host(j) + AUX_Host(j);//opcion mas directa como la de extraer row?
-		
+		for(j = 0; j < targets; j++) imagen_Host(i,j) = AUX2_Host(j);//opcion mas directa como la de extraer row?
+//		if(i == 0) for(j = 0; j < targets; j++) printf("%f  ",AUX2_Host(j));
+
 	}
 	t1 = timer.get();
 	printf("Tiempo image modifications: %f \n", t1-t0);
 
-	
+
 
 	viennacl::backend::finish();
 
 
 
-
-	//END CLOCK*****************************************
+	//END CLOCK*****************************************//
 	double end = get_time();
 	printf("Iterative SCLSU: %f segundos\n", (end - start) );
 	fflush(stdout);
-	//**************************************************
+	//**************************************************//
 
 	char results_filename[MAXCAD];
 	strcpy(results_filename, filename);
@@ -367,7 +395,7 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 	strcat(results_filename, "Results.bsq");
 	writeResult(imagen_Host, results_filename, lines, samples, targets, 5, NULL);
 
-	//FREE MEMORY***************************************
+	//FREE MEMORY***************************************//
 
 	/*free(wavelength);
 	free(interleaveE);
@@ -398,20 +426,26 @@ void lsu_gpu_v(float *imagen, float *endmembers, int DeviceSelected, int bandas,
 
 }
 
-void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename/*, cl_device_id deviceID*/){
-
+void lsu_gpu_m(	double *image_Host,
+		double *endmember_Host, 
+		int DeviceSelected, 
+		int bandas, 
+		int targets, 
+		int lines, 
+		int samples, 
+		char *filename){
 
 	int i, j, one = 1;
 	int sampleLines = lines * samples;
 
-	double *endmember_Host, *image_Host;//se puede mejorar(cambiarlo todo a double?)
+	/*double *endmember_Host, *image_Host;//se puede mejorar(cambiarlo todo a double?)
 	MALLOC_HOST(endmember_Host, double, targets*bandas)
 	MALLOC_HOST(image_Host, double, lines*samples*bandas)
 	for(i = 0; i < sampleLines*bandas; i++)
 		image_Host[i] = (double) image[i];
 
 	for(i = 0; i < targets*bandas; i++)
-		endmember_Host[i] = endmembers[i];
+		endmember_Host[i] = endmembers[i];*/
 
 	cl_int status;
 	unsigned int ok = 0;
@@ -433,7 +467,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	cl_uint numDevices;
 	//cl_platform_id platformID;
         cl_device_id deviceID;
-	
+
 	//deviceSelected-> 0:CPU, 1:GPU, 2:ACCELERATOR
 	int isCPU = 0, isGPU = 0, isACCEL=0;
 	if(DeviceSelected == 0){
@@ -445,7 +479,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	else if(DeviceSelected == 2){
 		isACCEL=1;
 	}
-	else{	
+	else{
 		printf("Selected device not found. Program will terminate\n");
 		exit(-1);
 	}
@@ -499,7 +533,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	magma_int_t err;
 	magma_init();//falla ponerle esta funcion??
 	magma_print_environment();	
-	
+
 
 	err = magma_queue_create( deviceID, &queue );
 	if ( err != 0 ) {
@@ -542,7 +576,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	MALLOC_HOST(abundancias_Host, double, lines*samples*targets)
 
 
-	
+//for(int m = 0; m < targets*bandas; m++) printf("%f ",endmember_Host[m]);printf("\n");
 
 
  	//magma_roundup -> ((m + 31)/32)*32//podria mejorar ligeramente, segun los testing
@@ -562,7 +596,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	magma_dgetmatrix(targets, targets, EtE_Device, size, targets, EtE_Host, targets, queue);
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("EtE_transfer host -> device: %f\n",dev_time);
-	//for(int m = 0; m < targets*targets; m++) printf("%f ",EtE_Host[m]); printf("\n");
+//for(int m = 0; m < targets*targets; m++) printf("%f ",EtE_Host[m]); printf("\n");
 
 /*
 	dev_time = magma_sync_wtime(queue);
@@ -580,6 +614,7 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	lapackf77_dgetri( &targets, EtE_Host, &targets, ipiv_Host, work, &lwork, &info );
 	magma_dsetmatrix(targets, targets, EtE_Host, targets, EtE_Device, size, targets, queue);
 
+//for(int m = 0; m < targets*targets; m++) printf("%.10f ",EtE_Host[m]);
 
 	dev_time = magma_sync_wtime(queue);
 	for(int m = 0; m < targets; m++) one_Host[m] = 1.0;
@@ -589,8 +624,9 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("Aux_dgemm: %f\n",dev_time);
 
-	
-	dev_time = magma_sync_wtime(queue);	
+//for(int m = 0; m < targets; m++) printf("%f ",aux_Host[m]);
+
+	dev_time = magma_sync_wtime(queue);
 	for(int m = 0; m < targets; m++) Y += aux_Host[m];
 	Y = 1 / Y;
 	for(int m = 0; m < targets; m++) aux_Host[m] = Y;
@@ -598,38 +634,53 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("aux_reduce(cpu): %f\n",dev_time);
 
+//printf("\n Y: %f \n",Y);
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, one, targets, targets, alpha, aux_Device, size, one, EtE_Device, size, targets, beta, aux2_Device, size, one, queue);
 	magma_dgetmatrix(targets, one, aux2_Device, size, targets, aux2_Host, targets, queue);
 
+//for(int m = 0; m < targets; m++) printf("%f ",aux2_Host[m]);printf("\n");
 
 	for(int m = 0; m < targets; m++)
 		for(int n = 0; n < targets; n++)
 			if(m == n) I_Host[m*targets+n] = 1 - aux2_Host[n];
 			else I_Host[m*targets+n] = -aux2_Host[n];
-	
+
 	magma_dsetmatrix(targets, targets, I_Host, targets, I_Device, size, targets, queue);
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("aux2_dgemm / I (init): %f\n",dev_time);
 
+//for(int m = 0; m < targets*targets; m++) printf("%f ",I_Host[m]);
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, targets, targets, alpha, I_Device, size, targets, EtE_Device, size, targets, beta, A_Device, size, targets, queue);
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("A_dgemm: %f\n",dev_time);
 
+//double *aa;
+//MALLOC_HOST(aa,double,targets*targets)
+//magma_dgetmatrix(targets,targets,A_Device,size,targets,aa,targets,queue);
+//for(int m = 0; m < targets*targets; m++) printf("%.10f ",aa[m]);printf("\n");
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, bandas, targets, alpha, A_Device, size, targets, endmember_Device, size, targets, beta, B_Device, size, targets, queue);
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("B_dgemm: %f\n",dev_time);
 
+/*
+double *bb;
+MALLOC_HOST(bb,double,targets*bandas)
+magma_dgetmatrix(targets,bandas,B_Device,size,targets,bb,targets,queue);
+//for(int m = 0; m < bandas; m++) printf("%f ",bb[m*targets]);printf("\n");
+*/
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, one, targets, alpha, EtE_Device, size, targets, one_Device, size, targets, beta, aux_Device, size, targets, queue);
 	magma_dgetmatrix(targets, one, aux_Device, size, targets, aux_Host, targets, queue);
+//for(int m = 0; m < targets; m++) printf("%.14f ",aux_Host[m]); printf("\n ");
 	for(int m = 0; m < targets; m++) aux_Host[m] *= Y;
+//for(int m = 0; m < targets; m++) printf("%f ",aux_Host[m]);printf("\n");
 	magma_dsetmatrix(targets, one, aux_Host, targets, aux_Device, size, targets, queue);
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("Aux_dgemm: %f\n",dev_time);
@@ -645,16 +696,12 @@ void lsu_gpu_m(float *image, float *endmembers, int DeviceSelected, int bandas, 
 		//magma_daxpy(targets, alpha, aux_Device, one, aux2_Device, one, queue);//no esta disponible en la version 1.3 <.<!
 		magma_dgetmatrix(targets, one, aux2_Device, size, targets, aux2_Host, targets, queue);
 		for(int n = 0; n < targets; n++) abundancias_Host[n*lines*samples + m] = aux2_Host[n]+aux_Host[n];
-		
-		//if(m == 0) for(int n = 0; n < targets; n++) printf("%f ", aux2_Host[n]+aux_Host[n]);
+
+
 	}
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("abundancias_solucion: %f\n",dev_time);
-	
-/*
-magma_dsetmatrix(bands, one, pixel_Host, bands, pixel_Device, size, bands, queue);
-magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, one, bands, alpha, B_Device, size, targets, pixel_Device, size, bands, beta, aux2_Device, size, targets, queue);
-*/
+
 
 
 	total_time = magma_sync_wtime(queue) - total_time;
@@ -672,10 +719,9 @@ magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, one, bands, alpha, B_Device, si
 	strcat(results_filename, "Results.bsq");
 	writeResult(abundancias_Host, results_filename, lines, samples, targets);
 
-		
 
-	magma_free_cpu(image_Host);
-	magma_free_cpu(endmember_Host);   
+	//magma_free_cpu(image_Host);
+	//magma_free_cpu(endmember_Host);   
 	magma_free_cpu(EtE_Host);
 	magma_free_cpu(one_Host);
 	magma_free_cpu(aux_Host);

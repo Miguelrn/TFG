@@ -28,7 +28,7 @@ void readHeader(char* filename, int *Samples, int *Lines, int *numBands, int *da
 	char line[200];
 	char *ptr;
 	int i=0;
-	
+
 
 	if(strstr(filename, ".hdr")==NULL){
 		printf("ERROR: El fichero %s no contiene el formato adecuado.Debe tener extension hdr\n", filename);
@@ -75,12 +75,13 @@ void readHeader(char* filename, int *Samples, int *Lines, int *numBands, int *da
 
 
 //load the image "filename" and do a cast over the original datatype into float datatype. Thus, it can operate with data inside the image.
-void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int numBands, int dataType){
+void Load_Image(char* filename, double *imageVector, int Samples, int Lines, int numBands, int dataType){
 
 	FILE *fp;
     	short int *tipo_short_int;
     	double *tipo_double;
-    	float *tipo_float, value;
+    	float *tipo_float;
+	double value;
     	int i;
 	int lines_samples=Lines*Samples;
    
@@ -100,7 +101,7 @@ void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int 
                 		fread(tipo_short_int,1,(sizeof(short int)*lines_samples*numBands),fp);
                 		//Convert image data datatype to float
                 		for(i=0; i<lines_samples * numBands; i+=1){
-		   			value=(float)tipo_short_int[i];
+		   			value=(double)tipo_short_int[i];
 					if(value>0)
                     				imageVector[i]=value;
 					else
@@ -113,11 +114,11 @@ void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int 
 				tipo_float = (float *) malloc (lines_samples*numBands * sizeof(float));
                 		fread(tipo_float,1,(sizeof(float)*lines_samples*numBands),fp);
 				for(i=0; i<lines_samples * numBands; i+=1){
-					value=tipo_float[i];
+					value = (double) tipo_float[i];
 					if(value>0)
-						imageVector[i]=value;
+						imageVector[i] = value;
 					else
-						imageVector[i]=0.0;
+						imageVector[i] = 0.0;
 				}
                 		free(tipo_float);
                			break;
@@ -126,7 +127,7 @@ void Load_Image(char* filename, float *imageVector, int Samples, int Lines, int 
 				tipo_double = (double *) malloc (lines_samples*numBands * sizeof(double));
                 		fread(tipo_double,1,(sizeof(double)*lines_samples*numBands),fp);
 				for(i=0; i<lines_samples * numBands; i+=1){
-					value=(float)tipo_double[i];
+					value = tipo_double[i];
 					if(value>0)
                 				imageVector[i]=value;
 					else
@@ -150,7 +151,7 @@ void writeResult( double *imagen, const char* resultado_filename, int num_sample
     FILE *fp;
     int i, j, np=num_samples*num_lines;
     //double* imagent = (double*)malloc(num_bands*np*sizeof(double) ); 
-
+//for(int i = 0; i < num_bands;i++)printf("%f ",imagen[i*num_samples*num_lines+100]);
     //open file "resultado_filename"
     if ((fp=fopen(resultado_filename,"wb"))!=NULL)
     {

@@ -8,7 +8,7 @@ __global double calculaVolumen(__local double *jointpoint_local, double *endmemb
 #pragma OPENCL EXTENSION cl_nv_pragma_unroll : enable
 
 __kernel void endmembers_calculation(
-					__global float* restrict ImageIn,
+					__global double* restrict ImageIn,
 					__global int* restrict posiciones,
 					__global double* restrict volumen,
 					const int n,
@@ -172,8 +172,8 @@ __kernel void reduce(
 
 //--------------------------------------------------Tercer Kernel ---------------------------------------------------------------------------//
 __kernel void extrae_endmember(__global int* restrict posiciones,
-				__global float* restrict ImageIn,
-				__global float* restrict ImageOut,
+				__global double* restrict ImageIn,
+				__global double* restrict ImageOut,
 				const int n,
 				const int primeraVuelta,
 				const int samples,

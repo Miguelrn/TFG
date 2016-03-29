@@ -2,16 +2,16 @@
 
 #pragma OPENCL EXTENSION cl_nv_pragma_unroll : enable
 
+//void exitOnFail(cl_int status, const char* message);
 
 
-
-pos *sga_gpu(   float *imagen,
+pos *sga_gpu(   double *imagen,
 		int num_endmembers,
 		int muestras, 
 		int lineas, 
 		int bandas, 
 		int deviceSelected, 
-		float *endmember_bandas, 
+		double *endmember_bandas, 
 		size_t localSize){
 
 	pos *solucion = (pos*) malloc((num_endmembers)*sizeof(pos));
@@ -181,7 +181,7 @@ pos *sga_gpu(   float *imagen,
  	solu[0] = rand() % muestras;//325
 
 	t_ram = get_time();
-	ImageIn  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  sizeof(float) * muestras * lineas * bandas, imagen, &status);
+	ImageIn  = clCreateBuffer(context,  CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR,  sizeof(double) * muestras * lineas * bandas, imagen, &status);
 	exitOnFail(status, "create buffer d_image");
 	posiciones = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,  sizeof(int) * num_endmembers * 2, solu, &status);
 	exitOnFail(status, "create buffer posiciones");
@@ -192,7 +192,7 @@ pos *sga_gpu(   float *imagen,
 	exitOnFail(status, "create buffer volumen");
 	matrix_aux = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(double) * muestras * lineas, NULL, &status);
 	exitOnFail(status, "create buffer matrix_aux");
-	ImageOut = clCreateBuffer(context,  CL_MEM_WRITE_ONLY,  sizeof(float) * bandas * num_endmembers, NULL, &status);
+	ImageOut = clCreateBuffer(context,  CL_MEM_WRITE_ONLY,  sizeof(double) * bandas * num_endmembers, NULL, &status);
 	exitOnFail(status, "create buffer matrix_aux");
   
 
@@ -271,7 +271,6 @@ pos *sga_gpu(   float *imagen,
 			primeraVuelta--;
             		clSetKernelArg(kernel_reduce, 3, sizeof(cl_uint), &primeraVuelta);
 			clSetKernelArg(kernel_extrae, 4, sizeof(cl_uint), &primeraVuelta);
-
 		}
 		else{
 			num_loop++;
@@ -298,7 +297,7 @@ pos *sga_gpu(   float *imagen,
 	clReleaseEvent(ev_memcpy);
 	read+=(end-start)*1.0e-9;
 
-	status = clEnqueueReadBuffer(command_queue, ImageOut, CL_TRUE, 0, sizeof(float) * num_endmembers * bandas, endmember_bandas, 0, NULL, &ev_memcpy);
+	status = clEnqueueReadBuffer(command_queue, ImageOut, CL_TRUE, 0, sizeof(double) * num_endmembers * bandas, endmember_bandas, 0, NULL, &ev_memcpy);
 	exitOnFail(status, "Error enqueuing read buffer command.");
 	start=(cl_ulong)0;
 	end=(cl_ulong)0;
