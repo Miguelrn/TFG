@@ -1,6 +1,6 @@
 #include "lsu.h"
 
-//void exitOnFail(cl_int status, const char* message);
+
 
 int writeResult(boost::numeric::ublas::matrix<double> image, const char* filename, int lines, int samples, int bands, int dataType, char* interleave){
 
@@ -115,7 +115,7 @@ int writeResult(boost::numeric::ublas::matrix<double> image, const char* filenam
 							imageD[i*bands*samples + (j*samples + k)] = image[j*lines*samples + (i*samples + k)];
 				break;*/
         	}
-//for(int i = 0; i < bands; i++) printf("%f ",imageD[i*lines*samples+100]);
+
 		FILE *fp;
     		if ((fp=fopen(filename,"wb"))!=NULL){
         		fseek(fp,0L,SEEK_SET);
@@ -184,8 +184,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	boost::numeric::ublas::vector<double> AUX2_Host(targets);
 	boost::numeric::ublas::matrix<double> I_Host(targets, targets);
 	boost::numeric::ublas::vector<double> PIXEL_Host(bandas);
-	//boost::numeric::ublas::matrix<double> B_Host(bandas, targets);
-	//boost::numeric::ublas::matrix<double> B_aux_Host(targets, bandas);
+
 	double Y_Host;
 
     	//Device
@@ -199,8 +198,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	viennacl::matrix<double> A_Device(targets, targets);
 	viennacl::matrix<double> B_Device(bandas, targets);
 	viennacl::vector<double> PIXEL_Device(bandas);
-	//viennacl::matrix<double> B_aux_Device(targets, bandas);
-	//viennacl::matrix<double> endmember_trans_Device(targets, bandas);
 
 	printf("---\n");
 
@@ -428,24 +425,270 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 void lsu_gpu_m(	double *image_Host,
 		double *endmember_Host, 
-		int DeviceSelected, 
-		int bandas, 
+		int DeviceSelected,//siempre va ser la GPU se podria eliminar 
+		int bands, 
 		int targets, 
 		int lines, 
 		int samples, 
 		char *filename){
 
-	int i, j, one = 1;
+	size_t size = 0;
+	double norm_y;
+	int ii,k;
+	double auxk;
+	double alpha = 1, beta = 0;
+	int lwork  = 5*(targets*targets);
+	magma_int_t info;
+	real_Double_t dev_time;
+	int linessamples = lines*samples;
+
+
+	// return code used by OpenCL API
+    	cl_int status;
+	unsigned int ok = 0, i, j;
+
+    	// determine number of platforms
+    	cl_uint numPlatforms;
+    	status = clGetPlatformIDs(0, NULL, &numPlatforms); //num_platforms returns the number of OpenCL platforms available
+    	exitOnFail2(status, "number of platforms");
+	
+
+	// get platform IDs
+  	cl_platform_id platformIDs[numPlatforms];
+    	status = clGetPlatformIDs(numPlatforms, platformIDs, NULL); //platformsIDs returns a list of OpenCL platforms found. 
+    	exitOnFail2(status, "get platform IDs");
+
+	cl_uint numDevices;
+	//cl_platform_id platformID;
+        cl_device_id deviceID;
+	
+	//deviceSelected-> 0:CPU, 1:GPU, 2:ACCELERATOR
+	int isCPU = 0, isGPU = 1, isACCEL=0;//usaremos la GPU por defecto
+
+	// iterate over platforms
+	for (i = 0; i < numPlatforms; i++){
+		// determine number of devices for a platform
+		status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+		exitOnFail2(status, "number of devices");
+		if (CL_SUCCESS == status){
+			// get device IDs for a platform
+			//printf("Number of devices: %d\n", numDevices);
+			cl_device_id deviceIDs[numDevices];
+			status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, numDevices, deviceIDs, NULL);
+			if (CL_SUCCESS == status){
+		       		// iterate over devices
+		    		for (j = 0; j < numDevices && !ok; j++){
+		       			cl_device_type deviceType;
+		          		status = clGetDeviceInfo(deviceIDs[j], CL_DEVICE_TYPE, sizeof(cl_device_type), &deviceType, NULL);
+		            		if (CL_SUCCESS == status){
+						//printf("Device Type: %d\n", deviceType);
+						//CPU device
+		               			if (isCPU && (CL_DEVICE_TYPE_CPU & deviceType)){
+							ok=1;
+		               				//platformID = platformIDs[i];
+		              				deviceID = deviceIDs[j];
+		               			}
+		               			//GPU device
+		               			if (isGPU && (CL_DEVICE_TYPE_GPU & deviceType)){
+							ok=1;
+							//platformID = platformIDs[i];
+							deviceID = deviceIDs[j];
+		                		}
+						//ACCELERATOR device
+		               			if (isACCEL && (CL_DEVICE_TYPE_ACCELERATOR & deviceType)){
+							ok=1;
+							//platformID = platformIDs[i];
+							deviceID = deviceIDs[j];
+		                		}
+					}
+		        	}
+		    	}
+		}
+	} 
+	if(!ok){
+		printf("Selected device not found. Program will terminate\n");
+		exit(-1);
+	}
+
+	//CLMAGMA
+	magma_queue_t  queue;
+	magma_int_t err;
+	magma_init();//falla ponerle esta funcion??
+	magma_print_environment();	
+	
+
+	err = magma_queue_create( deviceID, &queue );
+	if ( err != 0 ) {
+	  fprintf( stderr, "magma_queue_create failed: %d\n", (int) err );
+	  exit(-1);
+	}
+	
+	dev_time = magma_sync_wtime(queue);
+	//device
+	magmaDouble_ptr M_d, Y_d, MtM_d, UF_d, SF_d, V_d, work_d, IFS_d, IF_d, IF1_d, yy_d, X_d;
+	MALLOC_DEVICE(M_d, double, targets*bands)
+	MALLOC_DEVICE(Y_d, double, linessamples*bands)
+	MALLOC_DEVICE(MtM_d, double, targets*targets)
+	MALLOC_DEVICE(UF_d, double, targets*targets)
+	MALLOC_DEVICE(SF_d, double, targets)
+	MALLOC_DEVICE(V_d, double, targets*targets)
+	MALLOC_DEVICE(work_d, double, lwork)
+	MALLOC_DEVICE(IFS_d, double, targets*targets)
+	MALLOC_DEVICE(IF_d, double, targets*targets)
+	MALLOC_DEVICE(IF1_d, double, targets*targets)
+	MALLOC_DEVICE(yy_d, double, targets*linessamples)
+	MALLOC_DEVICE(X_d, double, targets*linessamples)
+
+
+	//host
+	double *MtM_h, *SF_h, *UF_h, *V_h, *work_h, *IFS_h, *IF_h, *Aux_h, *IF1_h, *abundancias_h;
+	MALLOC_HOST(MtM_h, double, targets*targets)
+	MALLOC_HOST(SF_h, double, targets)
+	MALLOC_HOST(UF_h, double, targets*targets)
+	MALLOC_HOST(V_h, double, targets*targets)
+	MALLOC_HOST(work_h, double, lwork)
+	MALLOC_HOST(IFS_h, double, targets*targets)
+	MALLOC_HOST(IF_h, double, targets*targets)
+	MALLOC_HOST(IF1_h, double, targets*targets)
+	MALLOC_HOST(Aux_h, double, targets)
+	MALLOC_HOST(abundancias_h, double, targets*linessamples)
+
+
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("Reserva e inicializacion de variables: %f\n",dev_time);
+
+	norm_y = avg_X_2(image_Host,linessamples,bands);
+	printf("norm_y: %f\n",norm_y);
+
+	divide_norm(image_Host, endmember_Host, norm_y, linessamples, bands, targets);
+
+//--------------------
+//printf("M\n");
+//for(int z = 0; z < targets*targets; z++) printf("%f ",endmember_Host[z]); printf("\n");
+//printf("Y\n");
+//for(int z = 0; z < targets*targets; z++) printf("%f ",image_Host[z]); printf("\n");//funciona lol
+//-----------------------
+
+	magma_dsetmatrix(targets, bands, endmember_Host, targets, M_d, size, targets, queue);
+	magma_dsetmatrix(bands, linessamples, image_Host, bands, Y_d, size, bands, queue);
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dgemm(MagmaTrans, MagmaNoTrans, targets, targets, bands, alpha, M_d, size, bands, M_d, size, bands, beta,  MtM_d, size, targets, queue);
+	magma_dgetmatrix(targets,targets, MtM_d, size, targets, MtM_h, targets, queue);
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("dgemm M'*M: %f\n",dev_time);
+
+
+//--------------------
+//printf("dgemm MtM\n");
+//for(int z = 0; z < targets*targets; z++) printf("%f ",MtM_h[z]); printf("\n");//funcina
+//-----------------------
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dgesvd(MagmaAllVec, MagmaNoVec, targets, targets, MtM_h, targets, SF_h, UF_h, targets, V_h, targets, work_h, lwork, queue, &info);
+	//printf("Info: %d\n", (int)info);
+	//magma_dsetmatrix(targets, one, SF_h, targets, SF_d, size, targets, queue);
+	magma_dsetmatrix(targets, targets, UF_h, targets, UF_d, size, targets, queue);
+	//magma_dsetmatrix(targets, targets, V_h, targets, V_d, size, targets, queue);
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("dgesvd: %f\n",dev_time);
+
+	UFdiag(UF_h, SF_h, IFS_h, targets, 1e-8);
+	magma_dsetmatrix(targets, targets, IFS_h, targets, IFS_d, size, targets, queue);
+//--------------------
+//printf("dgesv \n");
+//for(int z = 0; z < targets*targets; z++) printf("%f ",IFS_h[z]); printf("\n");//funciona
+//-----------------------
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dgemm(MagmaNoTrans, MagmaTrans, targets, targets, targets, alpha, IFS_d, size, targets, UF_d, size, targets, beta, IF_d, size, targets, queue);
+	magma_dgetmatrix(targets, targets, IF_d, size, targets, IF_h, targets, queue);
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("dgemm IFS*UF': %f\n",dev_time);
+
+//--------------------
+//printf("dgemm IF \n");
+///for(int z = 0; z < targets*targets; z++) printf("%f ",IF_h[z]); printf("\n");//funciona
+//-----------------------
+
+	IF1_Aux(IF_h, IF1_h, Aux_h, targets);
+
+
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, bands, alpha, Y_d, size, linessamples, M_d, size, bands, beta, yy_d, size, linessamples, queue);
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("dgemm Y*M: %f\n",dev_time);
+
+//--------------------
+//printf("dgemm Y*M = yy_d\n");
+//double *yyy;
+//MALLOC_HOST(yyy, double, targets*linessamples)
+//magma_dgetmatrix(targets, linessamples, yy_d, size, targets, yyy, targets, queue);
+//for(int z = 0; z < targets*targets; z++) printf("%f ",yyy[z]); printf("\n");
+//-----------------------
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dsetmatrix(targets, targets, IF1_h, targets, IF1_d, size, targets, queue);
+	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, targets, alpha, yy_d, size, linessamples, IF1_d, size, targets, beta, X_d, size, linessamples, queue);
+	dev_time = magma_sync_wtime(queue) - dev_time;
+	printf("dgemm yy*IF1: %f\n",dev_time);
+
+
+	magma_dgetmatrix(linessamples,targets, X_d, size, linessamples, abundancias_h, linessamples, queue);
+
+	
+	for (k=0; k< targets;k++){
+		auxk = Aux_h[k];
+		for (ii=0;ii<linessamples;ii++){//se puede paralelizar
+			abundancias_h[k*linessamples+ii] = abundancias_h[k*linessamples+ii] + auxk;	
+		}
+	}
+
+	magma_finalize();
+
+	char results_filename[MAXCAD];
+	strcpy(results_filename, filename);
+	strcat(results_filename, "Results.hdr");
+	writeHeader(results_filename, samples, lines, targets);
+
+
+	strcpy(results_filename, filename);
+	strcat(results_filename, "Results.bsq");
+	writeResult(abundancias_h, results_filename, lines, samples, targets);
+
+
+
+	magma_free(M_d);
+	magma_free(Y_d);
+	magma_free(MtM_d);
+	magma_free(UF_d);
+	magma_free(SF_d);
+	magma_free(V_d);
+	magma_free(work_d);
+	magma_free(IFS_d);
+	magma_free(IF_d);
+	magma_free(IF1_d);
+	magma_free(yy_d);
+
+
+	magma_free_cpu(MtM_h);
+	magma_free_cpu(SF_h);
+	magma_free_cpu(UF_h);
+	magma_free_cpu(V_h);
+	magma_free_cpu(work_h);
+	magma_free_cpu(IFS_h);
+	magma_free_cpu(IF_h);
+	magma_free_cpu(Aux_h);
+	magma_free_cpu(IF1_h);
+	magma_free_cpu(abundancias_h);
+
+
+
+
+	/*int i, j, one = 1;
 	int sampleLines = lines * samples;
 
-	/*double *endmember_Host, *image_Host;//se puede mejorar(cambiarlo todo a double?)
-	MALLOC_HOST(endmember_Host, double, targets*bandas)
-	MALLOC_HOST(image_Host, double, lines*samples*bandas)
-	for(i = 0; i < sampleLines*bandas; i++)
-		image_Host[i] = (double) image[i];
-
-	for(i = 0; i < targets*bandas; i++)
-		endmember_Host[i] = endmembers[i];*/
 
 	cl_int status;
 	unsigned int ok = 0;
@@ -548,6 +791,7 @@ void lsu_gpu_m(	double *image_Host,
 	int info;
 	int lwork = targets;//redundante ¿?
 	double Y = 0;
+
 	//DEVICE
 	magmaDouble_ptr endmember_Device, image_Device, EtE_Device, work_Device, one_Device, aux_Device, aux2_Device, I_Device, A_Device, B_Device, pixel_Device;
 	MALLOC_DEVICE(endmember_Device, double, targets*bandas)
@@ -598,14 +842,14 @@ void lsu_gpu_m(	double *image_Host,
 	printf("EtE_transfer host -> device: %f\n",dev_time);
 //for(int m = 0; m < targets*targets; m++) printf("%f ",EtE_Host[m]); printf("\n");
 
-/*
-	dev_time = magma_sync_wtime(queue);
-	magma_dgetrf_gpu( targets, targets, EtE_Device, size, targets, ipiv_Host, queue, &info);
+
+	//dev_time = magma_sync_wtime(queue);
+	//magma_dgetrf_gpu( targets, targets, EtE_Device, size, targets, ipiv_Host, queue, &info);
 	//(magma_int_t, magmaDouble_ptr, size_t, magma_int_t, magma_int_t*, magmaDouble_ptr, size_t, magma_int_t, _cl_command_queue**, magma_int_t*)	
-	magma_dgetri_gpu(targets, EtE_Device, size, targets, ipiv_Host, work_Device, size, lwork, &queue, &info);//parametro 6 tiene ilegal value ¿?¿?¿?¿?
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("EtE_sgemm: %f\n",dev_time);
-*/
+	//magma_dgetri_gpu(targets, EtE_Device, size, targets, ipiv_Host, work_Device, size, lwork, &queue, &info);//parametro 6 tiene ilegal value ¿?¿?¿?¿?
+	//dev_time = magma_sync_wtime(queue) - dev_time;
+	//printf("EtE_sgemm: %f\n",dev_time);
+
 
 	double *work = (double*)malloc(lwork*sizeof(double));
 	//dgetrf_(&targets, &targets, EtE_Host, &targets, ipiv, &info);
@@ -668,12 +912,12 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue) - dev_time;
 	printf("B_dgemm: %f\n",dev_time);
 
-/*
-double *bb;
-MALLOC_HOST(bb,double,targets*bandas)
-magma_dgetmatrix(targets,bandas,B_Device,size,targets,bb,targets,queue);
+
+//double *bb;
+//MALLOC_HOST(bb,double,targets*bandas)
+//magma_dgetmatrix(targets,bandas,B_Device,size,targets,bb,targets,queue);
 //for(int m = 0; m < bandas; m++) printf("%f ",bb[m*targets]);printf("\n");
-*/
+
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, targets, one, targets, alpha, EtE_Device, size, targets, one_Device, size, targets, beta, aux_Device, size, targets, queue);
@@ -741,7 +985,7 @@ magma_dgetmatrix(targets,bandas,B_Device,size,targets,bb,targets,queue);
 	magma_free(I_Device);
 	magma_free(A_Device);
 	magma_free(B_Device);
-	magma_free(pixel_Device);
+	magma_free(pixel_Device);*/
 }
 
 
@@ -753,30 +997,82 @@ void exitOnFail2(cl_int status, const char* message){
 	}
 }
 
+double avg_X_2(double *X, int lines_samples, int num_bands){
+
+	int i,j;
+    	double mean;
+	double value;
+	mean=0;
+
+	for(i=0; i<num_bands; i++){
+		
+        	for(j=0; j<lines_samples; j++){
+			value = X[(i*lines_samples)+j];
+        		mean += value*value;
+		}
+    	}
+
+	return(sqrt(mean/(lines_samples*num_bands)));
+}
+
+void divide_norm(double *X, double* M, double norm, int lines_samples, int bands, int p){
+
+	int i, j;
+
+	for (i = 0; i < bands;i++){ 
+		for (j = 0;j<lines_samples;j++){
+			X[i*lines_samples+j] = X[i*lines_samples+j]/ norm;
+		}
+	}
 
 
+	for (i = 0; i < bands;i++){ 
+		for (j = 0;j<p;j++){
+			M[i*p+j] = M[i*p+j]/ norm;
+		}
+	}
+
+}
+
+void UFdiag(double* UF,double* SF,double* IF,int targets,double mu){
+	int i,j  = 0;
+
+	for (i = 0; i< targets; i++){
+		for (j = 0; j< targets;j++){
+			IF[i*targets+j] = UF[i*targets+j]*(1/(SF[i]+mu));
+		}
+	}
+}
+
+void IF1_Aux(double* IF,double* IF1, double* Aux,int targets){
+
+	/// calloc pone a 0s los sumatorios pero pone por byte
+	double* sumaFilas = (double*)calloc(targets,sizeof(double));
+	double sumaTot;
+
+	int i, j;
 
 
+	sumaTot = 0;
+
+	for (i = 0; i< targets;i++){
+		for (j = 0; j < targets;j++){
+			sumaFilas[i] = sumaFilas[i] + IF[i*targets+j];	
+			sumaTot = sumaTot + IF[i*targets+j];
+		}
+	}
 
 
+	for (i = 0; i< targets;i++){
+		for (j = 0; j < targets;j++){
+			IF1[i*targets+j] = IF[i*targets+j] - ( sumaFilas[i]* sumaFilas[j] /sumaTot) ;
+		}
+		Aux[i] = sumaFilas[i] / sumaTot;
+	}
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	free(sumaFilas);
+}
 
 
 

@@ -6,6 +6,7 @@
 #include <CL/cl.h>
 #include <math.h>
 
+
 #include "ReadWrite.h"
 #include "gene.h"
 #include "sga.h"
@@ -23,8 +24,11 @@ int main(int argc, char **argv) {
 	char *tipo = (char*)malloc(MAXCAD*sizeof(char));
 	char *imagenhdr = (char*)malloc(MAXCAD*sizeof(char));
 	char *imagenbsq = (char*)malloc(MAXCAD*sizeof(char));
+	char endmember_file[MAXCAD];
+	double *endmember_bandas_Host;
 
 	int lines, samples, bands, datatype, i,j;
+	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;//se podria comprobar que lines y linesEnd son iguales... etc
 	cl_device_id deviceID;
 	int endmember = 19, error, deviceSelected, librarySelected = 0, maxEndmembers;
 	float probFail;
@@ -32,8 +36,9 @@ int main(int argc, char **argv) {
 	pos *solucion;
 
 	//Tener menos de 4 argumentos es incorrecto
-	if (argc != 7) {
-		fprintf(stderr, "Incorrect parameters: ./exe 'ruta imagen' 'Max Endmembers' 'Fail probability' 'local size' 'deviceSelected (0|1|2)' 'ViennaCL = 1, CLMagma = 2'\n");
+	if (argc != 8) {
+		fprintf(stderr, "Incorrect parameters: ./exe 'ruta imagen' 'Max Endmembers' 'Fail probability' 'local size' 'deviceSelected (0|1|2)' 'ViennaCL = 1, CLMagma = 2' 'a|b|c|d|e'\n");
+		fprintf(stderr,"a) GENE\nb) GENE + SCLSU\nc) SGA\nd) SCLSU\ne) GENE + SGA + SCLSU\n");
 		exit(1);
 	}
 
@@ -59,32 +64,101 @@ int main(int argc, char **argv) {
 	MALLOC_HOST(imagen_Host, double, samples*lines*bands)
 
 
-
 	strcpy(imagenbsq, argv[1]);
 	strcat(imagenbsq, ".bsq");
 	Load_Image(imagenbsq, imagen_Host, samples, lines, bands, datatype);
 	t1 = get_time();
 	printf("Tiempo de lectura de la Imagen: %f\n",t1-t0);
 
+	switch(argv[7][0]){
+		case 'a':/* GENE */
+			gene_magma(imagen_Host, samples, lines, bands, maxEndmembers, probFail);
+			break;
+
+		case 'b':/* GENE + SCLSU */
+
+			break;
+
+		case 'c':/* SGA */
+			printf("Please indicate how many endmembers need to be found:\n");
+			scanf ("%d",&endmember);
+			fflush(stdin);
+			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
+			t0 = get_time();
+			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
+			t1 = get_time();
+			break;
+
+		case 'd':/* SCLSU */
+			printf("Please include the path where the endmember file is stored:\n");
+			std::cin >> endmember_file;
+			
+			strcpy(imagenhdr,endmember_file);
+			strcat(imagenhdr, ".hdr");
+			readHeader(imagenhdr, &samplesEnd, &linesEnd, &bandsEnd, &datatypeEnd);
+			MALLOC_HOST(endmember_bandas_Host, double, linesEnd*bandsEnd)
+
+			strcpy(imagenbsq, endmember_file);
+			strcat(imagenbsq, ".bsq");
+			Load_Image(imagenbsq, endmember_bandas_Host, samplesEnd, linesEnd, bandsEnd, datatypeEnd);
+
+			t0 = get_time();
+			if(librarySelected == 1)//ViennaCl
+				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+			else if(librarySelected == 2)//ClMagma
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+			t1 = get_time();
+			break;
+
+		case 'e':/* GENE + SGA + SCLSU */
+			/*GENE*/
+			printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
+	
+			/*SGA*/
+			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
+			t0 = get_time();
+			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
+			t1 = get_time();
+
+
+			/*LSU*/
+			t0 = get_time();
+			if(librarySelected == 1)//ViennaCl
+				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+			else if(librarySelected == 2)//ClMagma
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+			t1 = get_time();
+
+			break;
+
+		default: printf("case not supported, exiting...\n"); exit(-1);
+	}
+	
+
+
+
+
+
 
 	/*GENE*/
-printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
+	//printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
 	
 	/*SGA*/
-	double *endmember_bandas_Host;
-	MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
-	t0 = get_time();
+
+	//MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
+	/*t0 = get_time();
 	solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
-	t1 = get_time();
+	t1 = get_time();*/
 
 	
 	/*LSU*/
-	t0 = get_time();
+	/*t0 = get_time();
 	if(librarySelected == 1)//ViennaCl
 		lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
 	else if(librarySelected == 2)//ClMagma
 		lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
-	t1 = get_time();
+	t1 = get_time();*/
+
 
 
 	/*strcpy(imagenbsq,argv[1]);
@@ -92,16 +166,16 @@ printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n")
 	writeResult(endmember_bandas, imagenbsq, endmember, 1, bands);
 	printf("File with endmembers saved at: %s\n",imagenbsq);*/
 
-	for(i = 0; i < endmember; i++){
+	/*for(i = 0; i < endmember; i++){
 		printf("%d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
-	}
+	}*/
 
 
 	magma_free_cpu(imagen_Host);
 	free(tipo);
 	free(imagenhdr);
 	free(imagenbsq);
-	magma_free_cpu(endmember_bandas_Host);
+	//magma_free_cpu(endmember_bandas_Host);//liberarlo despues de usarlo en los case
 	
 	return 0;
 

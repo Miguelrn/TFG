@@ -61,6 +61,10 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 //lsu whit Clmagma
 void lsu_gpu_m(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
+void IF1_Aux(double* IF,double* IF1, double* Aux,int targets);
+void UFdiag(double* UF,double* SF,double* IF,int targets,double mu);
+void divide_norm(double *X, double* M, double norm, int lines_samples, int bands, int p);
+double avg_X_2(double *X, int lines_samples, int num_bands);
 
 void exitOnFail2(cl_int status, const char* message);
 
