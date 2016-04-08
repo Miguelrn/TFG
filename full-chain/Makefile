@@ -3,7 +3,6 @@ ViennaCl     	?= /opt/ViennaCL-1.7.1
 Boost		?= /home/mrnavarro/boost_1_60_0
 
 
-
 CL_CFLAGS ?= -I/opt/intel/opencl-1.2-4.5.0.8/include
 CL_LDFLAGS ?= -L/opt/intel/opencl-1.2-4.5.0.8/lib64
 
@@ -12,12 +11,13 @@ CL_VFLAGS = -I$(ViennaCl) -I$(Boost) -lOpenCL -DVIENNACL_WITH_OPENCL
 MAGMADIR     ?= /opt/clmagma-1.3.0
 CUDADIR      ?= /usr/local/cuda-7.5
 OPENBLASDIR  ?= /opt/clBLAS-2.4.0-Linux-x64
-OPENCL_	     ?= /opt/intel/opencl-1.2-4.5.0.8
+#OPENCL_     ?= /opt/intel/opencl-1.2-4.5.0.8
+OPENCL_	     ?= /opt/intel/opencl-1.2-3.2.1.16712
 
 MAGMA_CFLAGS   :=  -DADD_ -I$(MAGMADIR)/include -I$(CUDADIR)/include -I$(OPENBLASDIR)/include
 
 MAGMA_LIBS   := -L$(OPENCL_)/lib64 -L$(MAGMADIR)/lib -L$(CUDADIR)/lib64 -L$(OPENBLASDIR)/lib64 \
-                -llapack -lOpenCL -lclmagma -lclBLAS
+                -llapack -lOpenCL -lclmagma -lclBLAS -lblas
 
 LIBRARIES := -lOpenCL -lm
 
@@ -35,7 +35,8 @@ CC = g++
 all: build
 build: full-chain
 
-#gene.o: gene.c
+gene.o: gene.cpp
+	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) $(CFLAGS) $(MAGMA_CFLAGS)
 
 sga.o : sga.c
 	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) -w
@@ -49,7 +50,7 @@ ReadWrite.o: ReadWrite.c
 main.o: main.cpp	
 	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) -w -I$(ViennaCl) -I$(Boost) $(MAGMA_CFLAGS)
 
-full-chain: main.o ReadWrite.o sga.o lsu.o
+full-chain: main.o ReadWrite.o sga.o lsu.o gene.o
 	$(CC) $(OPT) -o $@ $+ $(LIBRARIES) $(MAGMA_LIBS) 
 
 clean:

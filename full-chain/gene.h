@@ -1,6 +1,13 @@
 #ifndef GENE_H
 #define GENE_H
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <ctype.h>
+#include <math.h>
+#include <time.h>
+#include <string.h>
+
 //ClMagma Library
 #include <magma.h>
 #include <magma_lapack.h>
@@ -22,6 +29,10 @@ if ( MAGMA_SUCCESS !=                                                  \
     exit(-1);                                                          \
 }
 
+//extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 
+void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA);
+
+void exitOnFail3(cl_int status, const char* message);
 
 #endif
