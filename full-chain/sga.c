@@ -74,10 +74,10 @@ pos *sga_gpu(   double *imagen,
     	cl_uint numPlatforms;
     	status = clGetPlatformIDs(0, NULL, &numPlatforms); //num_platforms returns the number of OpenCL platforms available
     	exitOnFail(status, "number of platforms");
-	if (CL_SUCCESS == status){
+	/*if (CL_SUCCESS == status){
 		printf("\nNumber of OpenCL platforms: %d\n", numPlatforms);
 		printf("\n-------------------------\n");
-	}
+	}*/
 	
 	// get platform IDs
   	cl_platform_id platformIDs[numPlatforms];
@@ -111,7 +111,7 @@ pos *sga_gpu(   double *imagen,
 		exitOnFail(status, "number of devices");
 		if (CL_SUCCESS == status){
 			// get device IDs for a platform
-			printf("Number of devices: %d\n", numDevices);
+			//printf("Number of devices: %d\n", numDevices);
 			cl_device_id deviceIDs[numDevices];
 			status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, numDevices, deviceIDs, NULL);
 			if (CL_SUCCESS == status){
@@ -223,7 +223,8 @@ pos *sga_gpu(   double *imagen,
  	status |= clSetKernelArg(kernel_extrae, 4, sizeof(cl_uint), &primeraVuelta);
  	status |= clSetKernelArg(kernel_extrae, 5, sizeof(cl_uint), &muestras); 
  	status |= clSetKernelArg(kernel_extrae, 6, sizeof(cl_uint), &lineas);
- 	status |= clSetKernelArg(kernel_extrae, 7, sizeof(cl_uint), &bandas); 
+ 	status |= clSetKernelArg(kernel_extrae, 7, sizeof(cl_uint), &bandas);
+ 	status |= clSetKernelArg(kernel_extrae, 8, sizeof(cl_uint), &num_endmembers);
 	exitOnFail(status, "Unable to set kernel extrae arguments.");
 
 	//printf("Global: %d, Local: %d\n",global,localSize);
@@ -328,6 +329,7 @@ pos *sga_gpu(   double *imagen,
 	clReleaseProgram(program);
 	clReleaseKernel(kernel_endmember);
 	clReleaseKernel(kernel_reduce);
+	clReleaseKernel(kernel_extrae);
 	clReleaseCommandQueue(command_queue);
     	clReleaseContext(context);
 

@@ -178,15 +178,16 @@ __kernel void extrae_endmember(__global int* restrict posiciones,
 				const int primeraVuelta,
 				const int samples,
 				const int lines,
-				const int bands){
+				const int bands,
+				const int num_endmembers){
 
 	const int gidx = get_global_id(0);
 
 	if(primeraVuelta){
-		ImageOut[gidx] = ImageIn[posiciones[0] + posiciones[1]*samples + samples*lines*gidx];
+		ImageOut[gidx*num_endmembers] = ImageIn[posiciones[0] + posiciones[1]*samples + samples*lines*gidx];
 	}	
 	else{
-		ImageOut[n*bands+gidx] = ImageIn[posiciones[2*n] + posiciones[2*n+1]*samples + samples*lines*gidx];
+		ImageOut[gidx*num_endmembers+n] = ImageIn[posiciones[2*n] + posiciones[2*n+1]*samples + samples*lines*gidx];
 	}
 
 }
