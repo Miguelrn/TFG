@@ -17,6 +17,7 @@
 #include "viennacl/linalg/lu.hpp"
 #include "viennacl/ocl/context.hpp"
 #include "viennacl/linalg/sum.hpp"
+//#include "viennacl/linalg/svd.hpp"
 
 
 //uBlas Headers
@@ -58,6 +59,8 @@ if ( MAGMA_SUCCESS !=                                                  \
 
 //lsu whit ViennaCl
 void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
+
+
 
 //lsu whit Clmagma
 void lsu_gpu_m(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
