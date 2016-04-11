@@ -10,8 +10,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 	int i, j, one = 1;
 	int sampleLines = lines * samples;	
-	double start = get_time();
-
+	double t0Init = get_time();
 
 	viennacl::ocl::context();
 	if(DeviceSelected == 0){
@@ -26,8 +25,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 		exit(-1);
 	}
 
-	double end = get_time();
-	printf("Time platform init: %f\n",end-start);
 
 	//std::cout << viennacl::ocl::current_device().info() << std::endl;
 
@@ -37,6 +34,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 	double Y_Host;
 	double t0, t1;
+	double tTransfer = 0.0, tExeGPU = 0.0, tExeCPU = 0.0;
 	double norm_imagen;
 	int lwork = 5*(targets*targets);
 	int info = 1;
@@ -66,7 +64,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 
 
-	
 
     	//Device
 	viennacl::matrix<double> imagen_Device(sampleLines, bandas);
@@ -81,42 +78,44 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 	//viennacl::matrix<double> endmember_Device_aux(bandas, targets);
 
+	double t1Init = get_time();
 
-
-
-	printf("---\n");
-	start = get_time();
+	printf("-----------------------------------------------------------------------\n");
+	printf("                            ViennaCl\n");
+	printf("-----------------------------------------------------------------------\n");
+	//start = get_time();
 
 	t0 = timer.get();
 	norm_imagen = avg_X_2(imagen, sampleLines, bandas);
 	t1 = timer.get();
-	printf("Tiempo norm_y(host): %f \n", t1-t0);
+	tExeCPU += t1-t0;
+	//printf("Tiempo norm_y(host): %f \n", t1-t0);
 
 
 	t0 = timer.get();
 	divide_norm(imagen, endmembers, norm_imagen, sampleLines, bandas, targets);
 	t1 = timer.get();
-	printf("Tiempo divide_norm(host): %f \n", t1-t0);
+	tExeCPU += t1-t0;
+	//printf("Tiempo divide_norm(host): %f \n", t1-t0);
 
 
 	t0 = timer.get();
 	for(i = 0; i < sampleLines; i++) for(j = 0; j < bandas; j++) imagen_Host(i,j) = imagen[i + j*sampleLines];
 	for(i = 0; i < bandas; i++) for(j = 0; j < targets; j++) endmember_Host(i,j) = endmembers[i + j*bandas];
-	//for(i = 0; i < bandas; i++) for(j=0; j<targets; j++) endmember_Host_aux(i,j) = endmembers[i + j*bandas];//<----------------
 	viennacl::copy(imagen_Host, imagen_Device);
 	viennacl::copy(endmember_Host, endmember_Device);
-	//viennacl::copy(endmember_Host_aux, endmember_Device_aux);//<----------------------------------
 	t1 = timer.get();
-	printf("Tiempo transfer Host->Device: %f \n", t1-t0);
+	tTransfer += t1-t0;
+	printf("Tiempo transfer Host->Device(imagen): %f \n", t1-t0);
+
 
 
 	// MtM = M'*M
 	t0 = timer.get();
 	MtM_Device = viennacl::linalg::prod(viennacl::trans(endmember_Device), endmember_Device);
-	//MtM_Device = viennacl::linalg::prod(viennacl::trans(endmember_Device_aux), endmember_Device_aux);//<----------------------------
-//for(i = 0; i < targets; i++) for(j=0; j<targets; j++) if(MtM_Device(i,j) != MtM_Device(i,j)) {printf("ERROR: (%d) %f != %f\n",i*targets+j, MtM_Device(i,j),MtM_Device_aux(i,j)); exit(-1);}
 	t1 = timer.get();
-	printf("Tiempo dgemm(MtM): %f \n", t1-t0);
+	tExeGPU += t1-t0;
+	//printf("Tiempo dgemm(MtM): %f \n", t1-t0);
 
 /* produce resultados incorrectos...
 	t0 = timer.get();
@@ -130,28 +129,36 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	t0 = timer.get();
 	viennacl::copy(MtM_Device, MtM_Host);
 	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) MtM[i*targets+j] = MtM_Host(i,j);
+	t1 = timer.get();
+	tTransfer += t1-t0;
+
+	t0 = timer.get();
 	dgesvd_("A", "N", &targets, &targets, MtM, &targets, SF, UF, &targets, V, &targets, work, &lwork, &info);
 	t1 = timer.get();
-	printf("Tiempo svd: %f \n", t1-t0);
+	tExeCPU += t1-t0;
+	//printf("Tiempo svd: %f \n", t1-t0);
 
 
 	t0 = timer.get();
 	UFdiag(UF, SF, IFS, targets, 1e-8);//se puede paralelizar pero es muy pequeño => tarda mas en gpu
 	t1 = timer.get();
-	printf("Tiempo UFdiag: %f \n", t1-t0);
+	tExeCPU += t1-t0;
+	//printf("Tiempo UFdiag: %f \n", t1-t0);
 
 	t0 = timer.get();
 	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ UF_Host(i,j) = UF[i+j*targets]; IFS_Host(i,j) = IFS[i+j*targets];}
 	viennacl::copy(UF_Host, UF_Device);
 	viennacl::copy(IFS_Host, IFS_Device);
 	t1 = timer.get();
-	printf("Tiempo transfer(UF e IFS): %f \n", t1-t0);
+	tTransfer += t1-t0;
+	//printf("Tiempo transfer(UF e IFS): %f \n", t1-t0);
 
 	
 	t0 = timer.get();
 	IF_Device = viennacl::linalg::prod(IFS_Device, viennacl::trans(UF_Device));
 	t1 = timer.get();
-	printf("Tiempo dgemm(IF): %f \n", t1-t0);	
+	tExeGPU += t1-t0;
+	//printf("Tiempo dgemm(IF): %f \n", t1-t0);	
 
 	//std::cout << IF_Device << std::endl;
 
@@ -159,46 +166,45 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	t0 = timer.get();
 	viennacl::copy(IF_Device, IF_Host);
 	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF[i*targets+j] = IF_Host(i,j);
+	t1 = timer.get();
+	tTransfer += t1-t0;
+
+	t0 = timer.get();
 	IF1_Aux(IF, IF1, Aux, targets);
 	t1 = timer.get();
-	printf("Tiempo IF1_Aux: %f \n", t1-t0);
+	tExeCPU += t1-t0;
+	//printf("Tiempo IF1_Aux: %f \n", t1-t0);
 
 	
 	t0 = timer.get();
 	yy_Device = viennacl::linalg::prod(imagen_Device, endmember_Device);
 	t1 = timer.get();
-	printf("Tiempo dgemm(yy): %f \n", t1-t0);
+	tExeGPU += t1-t0;
+	//printf("Tiempo dgemm(yy): %f \n", t1-t0);
 
 
-/*
-boost::numeric::ublas::matrix<double> aa(sampleLines, targets);
-viennacl::copy(yy_Device, aa);
-double *aaa = (double*)malloc((sampleLines*targets)*sizeof(double));
-for(i = 0; i < sampleLines; i++) for(j = 0; j < targets; j++) aaa[i*targets+j] = aa(i,j);
-
-for(i = 0; i < targets*2; i++)  printf("%f ", aaa[i]); printf("\n%f\n",aaa[sampleLines*targets-1]);
-*/
 
 	t0 = timer.get();
 	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF1_Host(i,j) = IF1[i*targets+j];
 	viennacl::copy(IF1_Host, IF1_Device);
+	t1 = timer.get();
+	tTransfer += t1-t0;
+
+	t0 = timer.get();
 	abundancias_Device = viennacl::linalg::prod(yy_Device, IF1_Device);//sale transpuesta
 	t1 = timer.get();
-	printf("Tiempo dgemm(abundancias): %f \n", t1-t0);
+	tExeGPU += t1-t0;
+	//printf("Tiempo dgemm(abundancias): %f \n", t1-t0);
 
 
 	t0 = timer.get();
 	viennacl::copy(abundancias_Device, abundancias_Host);
 	for(i = 0; i < sampleLines; i++) for(j = 0; j < targets; j++) abundancias[i+j*sampleLines] = abundancias_Host(i,j);
+	t1 = timer.get();
+	tTransfer += t1-t0;	
+	//for(i = 0; i < targets; i++)  printf("%f ", abundancias[i]); printf("\n%f\n",abundancias[sampleLines*targets-1]);
 
-for(i = 0; i < targets; i++)  printf("%f ", abundancias[i]); printf("\n%f\n",abundancias[sampleLines*targets-1]);
-
-
-
-
-
-
-
+	t0 = timer.get();
 	for (j = 0; j < targets; j++){
 		auxk = Aux[j];
 		for (i = 0; i < sampleLines; i++){
@@ -206,15 +212,20 @@ for(i = 0; i < targets; i++)  printf("%f ", abundancias[i]); printf("\n%f\n",abu
 		}
 	}
 	t1 = timer.get();
-	printf("Tiempo (abundancias + auk): %f \n", t1-t0);	
+	tExeCPU += t1-t0;
+	//printf("Tiempo (abundancias + auk): %f \n", t1-t0);	
 
 
 	viennacl::backend::finish();
 
 
+	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
+	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
+	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tTotal-(t1Init-t0Init), tTransfer, (tTransfer*100)/tTotal, tExeCPU, (tExeCPU*100)/tTotal, tExeGPU, (tExeGPU*100)/tTotal);
+	printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
 
-	end = get_time();
-	printf("Total SCLSU Viennacl Time: %f\n",end-start);
+
+
 
 
 	char results_filename[MAXCAD];
@@ -225,7 +236,7 @@ for(i = 0; i < targets; i++)  printf("%f ", abundancias[i]); printf("\n%f\n",abu
 
 	strcpy(results_filename, filename);
 	strcat(results_filename, "Results.bsq");
-	writeResult(abundancias, results_filename, lines, samples, targets);
+	writeResult(abundancias, results_filename, samples, lines, targets);//estaba al reves
 
 
 	//FREE MEMORY***************************************//
@@ -273,6 +284,10 @@ void lsu_gpu_m(	double *image_Host,
 	magma_int_t info;
 	real_Double_t dev_time;
 	int linessamples = lines*samples;
+
+	double tTransfer = 0.0, tExeGPU = 0.0, tExeCPU = 0.0;
+	double t0Init = get_time();
+	
 
 
 	// return code used by OpenCL API
@@ -342,6 +357,9 @@ void lsu_gpu_m(	double *image_Host,
 		exit(-1);
 	}
 
+	printf("-----------------------------------------------------------------------\n");
+	printf("                            ClMagma\n");
+	printf("-----------------------------------------------------------------------\n");
 	//CLMAGMA
 	magma_queue_t  queue;
 	magma_int_t err;
@@ -355,7 +373,7 @@ void lsu_gpu_m(	double *image_Host,
 	  exit(-1);
 	}
 	
-	dev_time = magma_sync_wtime(queue);
+
 	//device
 	magmaDouble_ptr M_d, Y_d, MtM_d, UF_d, SF_d, V_d, work_d, IFS_d, IF_d, IF1_d, yy_d, X_d;
 	MALLOC_DEVICE(M_d, double, targets*bands)
@@ -385,14 +403,14 @@ void lsu_gpu_m(	double *image_Host,
 	MALLOC_HOST(Aux_h, double, targets)
 	MALLOC_HOST(abundancias_h, double, targets*linessamples)
 
+	double t1Init = get_time();
 
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("Reserva e inicializacion de variables: %f\n",dev_time);
 
+	dev_time = magma_sync_wtime(queue);
 	norm_y = avg_X_2(image_Host,linessamples,bands);
-	printf("norm_y: %f\n",norm_y);
-
 	divide_norm(image_Host, endmember_Host, norm_y, linessamples, bands, targets);
+	tExeCPU += magma_sync_wtime(queue) - dev_time;
+
 
 //--------------------
 //printf("M\n");
@@ -401,14 +419,22 @@ void lsu_gpu_m(	double *image_Host,
 //for(int z = 0; z < targets*targets; z++) printf("%f ",image_Host[z]); printf("\n");//funciona lol
 //-----------------------
 
+	dev_time = magma_sync_wtime(queue);
 	magma_dsetmatrix(targets, bands, endmember_Host, targets, M_d, size, targets, queue);
 	magma_dsetmatrix(bands, linessamples, image_Host, bands, Y_d, size, bands, queue);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+	//printf("transfer image: %f\n",dev_time);
+
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaTrans, MagmaNoTrans, targets, targets, bands, alpha, M_d, size, bands, M_d, size, bands, beta,  MtM_d, size, targets, queue);
+	tExeGPU += magma_sync_wtime(queue) - dev_time;
+
+
+	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(targets,targets, MtM_d, size, targets, MtM_h, targets, queue);
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("dgemm M'*M: %f\n",dev_time);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+	//printf("dgemm M'*M: %f\n",dev_time);
 
 
 //--------------------
@@ -418,15 +444,24 @@ void lsu_gpu_m(	double *image_Host,
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgesvd(MagmaAllVec, MagmaNoVec, targets, targets, MtM_h, targets, SF_h, UF_h, targets, V_h, targets, work_h, lwork, queue, &info);
-	//printf("Info: %d\n", (int)info);
-	//magma_dsetmatrix(targets, one, SF_h, targets, SF_d, size, targets, queue);
-	magma_dsetmatrix(targets, targets, UF_h, targets, UF_d, size, targets, queue);
-	//magma_dsetmatrix(targets, targets, V_h, targets, V_d, size, targets, queue);
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("dgesvd: %f\n",dev_time);
+	tExeGPU += magma_sync_wtime(queue) - dev_time;
 
+
+	dev_time = magma_sync_wtime(queue);
+	magma_dsetmatrix(targets, targets, UF_h, targets, UF_d, size, targets, queue);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+	//printf("dgesvd: %f\n",dev_time);
+
+
+	dev_time = magma_sync_wtime(queue);
 	UFdiag(UF_h, SF_h, IFS_h, targets, 1e-8);
+	tExeCPU += magma_sync_wtime(queue) - dev_time;
+
+
+	dev_time = magma_sync_wtime(queue);
 	magma_dsetmatrix(targets, targets, IFS_h, targets, IFS_d, size, targets, queue);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+
 //--------------------
 //printf("dgesv (sf_h) \n");
 //for(int z = 0; z < targets; z++) printf("%f ",SF_h[z]); printf("\n");
@@ -438,53 +473,73 @@ void lsu_gpu_m(	double *image_Host,
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaTrans, targets, targets, targets, alpha, IFS_d, size, targets, UF_d, size, targets, beta, IF_d, size, targets, queue);
+	tExeGPU += magma_sync_wtime(queue) - dev_time;
+
+
+	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(targets, targets, IF_d, size, targets, IF_h, targets, queue);
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("dgemm IFS*UF': %f\n",dev_time);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+	//printf("dgemm IFS*UF': %f\n",dev_time);
 
 //--------------------
 //printf("dgemm IF \n");
 //for(int z = 0; z < targets*targets; z++) printf("%f ",IF_h[z]); printf("\n");//funciona
 //-----------------------
 
+	dev_time = magma_sync_wtime(queue);
 	IF1_Aux(IF_h, IF1_h, Aux_h, targets);
-
+	tExeCPU += magma_sync_wtime(queue) - dev_time;
 
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, bands, alpha, Y_d, size, linessamples, M_d, size, bands, beta, yy_d, size, linessamples, queue);
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("dgemm Y*M: %f\n",dev_time);
+	tExeGPU += magma_sync_wtime(queue) - dev_time;
+	//printf("dgemm Y*M: %f\n",dev_time);
 
 //--------------------
-printf("dgemm Y*M = yy_d\n");
-double *yyy;
-MALLOC_HOST(yyy, double, targets*linessamples)
-magma_dgetmatrix(targets, linessamples, yy_d, size, targets, yyy, targets, queue);
-for(int z = 0; z < targets*2; z++) printf("%f ",yyy[z]); printf("\n");
-printf("%f ",yyy[targets*linessamples-1]); printf("\n");
+//printf("dgemm Y*M = yy_d\n");
+//double *yyy;
+//MALLOC_HOST(yyy, double, targets*linessamples)
+//magma_dgetmatrix(targets, linessamples, yy_d, size, targets, yyy, targets, queue);
+//for(int z = 0; z < targets*2; z++) printf("%f ",yyy[z]); printf("\n");
+//printf("%f ",yyy[targets*linessamples-1]); printf("\n");
 //-----------------------
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dsetmatrix(targets, targets, IF1_h, targets, IF1_d, size, targets, queue);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
+
+
+	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, targets, alpha, yy_d, size, linessamples, IF1_d, size, targets, beta, X_d, size, linessamples, queue);
-	dev_time = magma_sync_wtime(queue) - dev_time;
-	printf("dgemm yy*IF1: %f\n",dev_time);
+	tExeGPU += magma_sync_wtime(queue) - dev_time;
+	//printf("dgemm yy*IF1: %f\n",dev_time);
 
 
+	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(linessamples,targets, X_d, size, linessamples, abundancias_h, linessamples, queue);
+	tTransfer += magma_sync_wtime(queue) - dev_time;
 
 //-------------
 //for(int z = 0; z < targets; z++) printf("%f ",abundancias_h[z]);printf("\n%f\n",abundancias_h[linessamples*targets-1]);
-//---------------	
+//---------------
+	dev_time = magma_sync_wtime(queue);	
 	for (k=0; k< targets;k++){
 		auxk = Aux_h[k];
-		for (ii=0;ii<linessamples;ii++){//se puede paralelizar
+		for (ii=0;ii<linessamples;ii++){
 			abundancias_h[k*linessamples+ii] = abundancias_h[k*linessamples+ii] + auxk;	
 		}
 	}
+	tExeCPU += magma_sync_wtime(queue) - dev_time;
 
 	magma_finalize();
+
+
+	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
+	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
+	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tTotal-(t1Init-t0Init), tTransfer, (tTransfer*100)/tTotal, tExeCPU, (tExeCPU*100)/tTotal, tExeGPU, (tExeGPU*100)/tTotal);
+	printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
+
 
 	char results_filename[MAXCAD];
 	strcpy(results_filename, filename);
