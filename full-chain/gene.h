@@ -29,7 +29,6 @@ if ( MAGMA_SUCCESS !=                                                  \
     exit(-1);                                                          \
 }
 
-//extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, double *alpha, double *a, int *lda, double *b, int *ldb, double *beta, double *c, int *ldc);
 
 void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA);
 
