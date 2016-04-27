@@ -8,6 +8,7 @@
 
 
 #include "ReadWrite.h"
+#include "init_platform.h"
 #include "gene.h"
 #include "sga.h"
 #include "lsu.h"
@@ -35,7 +36,10 @@ int main(int argc, char **argv) {
 	size_t localSize;
 	pos *solucion;
 
-	//Tener menos de 4 argumentos es incorrecto
+	cl_context context;
+	cl_command_queue command_queue;
+
+	//Tener menos de 8 argumentos es incorrecto
 	if (argc != 8) {
 		fprintf(stderr, "Incorrect parameters: ./exe 'ruta imagen' 'Max Endmembers' 'Fail probability' 'local size' 'deviceSelected (0|1|2)' 'ViennaCL = 1, CLMagma = 2' 'a|b|c|d|e'\n");
 		fprintf(stderr,"a) GENE\nb) GENE + SCLSU\nc) SGA\nd) SCLSU\ne) GENE + SGA + SCLSU\n");
@@ -70,6 +74,12 @@ int main(int argc, char **argv) {
 	t1 = get_time();
 	printf("Tiempo de lectura de la Imagen: %f\n",t1-t0);
 
+	t0 = get_time();
+	init_OpenCl(&context, &command_queue, deviceSelected);
+	//init magma
+	//init Viennacl ?
+	t1 = get_time();
+
 	switch(argv[7][0]){
 		case 'a':/* GENE */
 			gene_magma(imagen_Host, samples, lines, bands, maxEndmembers, probFail);
@@ -85,7 +95,7 @@ int main(int argc, char **argv) {
 			fflush(stdin);
 			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
+			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, endmember_bandas_Host, localSize, context, command_queue);
 			t1 = get_time();
 			break;
 
@@ -112,12 +122,12 @@ int main(int argc, char **argv) {
 
 		case 'e':/* GENE + SGA + SCLSU */
 			/*GENE*/
-			printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
+			printf("\nojo hasta que no este gene completo se calculara %d endmembers!!\n\n",endmember);
 	
 			/*SGA*/
 			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
+			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, endmember_bandas_Host, localSize, context, command_queue);
 			t1 = get_time();
 
 
@@ -166,9 +176,9 @@ int main(int argc, char **argv) {
 	writeResult(endmember_bandas, imagenbsq, endmember, 1, bands);
 	printf("File with endmembers saved at: %s\n",imagenbsq);*/
 
-	/*for(i = 0; i < endmember; i++){
+	for(i = 0; i < endmember; i++){
 		printf("%d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
-	}*/
+	}
 
 
 	magma_free_cpu(imagen_Host);
@@ -176,6 +186,8 @@ int main(int argc, char **argv) {
 	free(imagenhdr);
 	free(imagenbsq);
 	//magma_free_cpu(endmember_bandas_Host);//liberarlo despues de usarlo en los case
+	//clReleaseCommandQueue(command_queue);
+    	//clReleaseContext(context);
 	
 	return 0;
 

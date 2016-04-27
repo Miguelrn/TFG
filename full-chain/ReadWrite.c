@@ -174,6 +174,7 @@ void writeResult( double *imagen, const char* resultado_filename, int num_sample
     fclose(fp);
 }
 
+
 // Write the header into ".hdr" file
 void writeHeader(const char* outHeader, int samples, int lines, int bands){
     // open the file

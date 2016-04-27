@@ -67,6 +67,64 @@ pos *sga_gpu(   double *imagen,
 	
 	// ensure the string is NULL terminated
 	kernel_src[filelen]='\0';
+
+     	// determine number of platforms
+    	cl_uint numPlatforms;
+    	status = clGetPlatformIDs(0, NULL, &numPlatforms); //num_platforms returns the number of OpenCL platforms available
+    	exitOnFail(status, "number of platforms");
+	
+
+	// get platform IDs
+  	cl_platform_id platformIDs[numPlatforms];
+    	status = clGetPlatformIDs(numPlatforms, platformIDs, NULL); //platformsIDs returns a list of OpenCL platforms found. 
+    	exitOnFail(status, "get platform IDs");
+	cl_uint numDevices;
+	//cl_platform_id platformID;
+        cl_device_id deviceID;
+	
+	//deviceSelected-> 0:CPU, 1:GPU, 2:ACCELERATOR
+	int isCPU = 0, isGPU = 1, isACCEL=0;//por defecto con ClMagma vamos a usar la gpu solo
+	
+	// iterate over platforms
+	for (i = 0; i < numPlatforms; i++){
+		// determine number of devices for a platform
+		status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
+		//exitOnFail(status, "number of devices");
+		if (CL_SUCCESS == status){
+			// get device IDs for a platform
+			//printf("Number of devices: %d\n", numDevices);
+			cl_device_id deviceIDs[numDevices];
+			status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, numDevices, deviceIDs, NULL);
+			if (CL_SUCCESS == status){
+		       		// iterate over devices
+		    		for (j = 0; j < numDevices && !ok; j++){
+		       			cl_device_type deviceType;
+		          		status = clGetDeviceInfo(deviceIDs[j], CL_DEVICE_TYPE, sizeof(cl_device_type), &deviceType, NULL);
+		            		if (CL_SUCCESS == status){
+						//printf("Device Type: %d\n", deviceType);
+						//CPU device
+		               			if (isCPU && (CL_DEVICE_TYPE_CPU & deviceType)){
+							ok=1;
+		               				//platformID = platformIDs[i];
+		              				deviceID = deviceIDs[j];
+		               			}
+		               			//GPU device
+		               			if (isGPU && (CL_DEVICE_TYPE_GPU & deviceType)){
+							ok=1;
+							//platformID = platformIDs[i];
+							deviceID = deviceIDs[j];
+		                		}
+						//ACCELERATOR device
+		               			if (isACCEL && (CL_DEVICE_TYPE_ACCELERATOR & deviceType)){
+							ok=1;
+							//platformID = platformIDs[i];
+							deviceID = deviceIDs[j];
+		                		}
+					}
+		        	}
+		    	}
+		}
+	}
    	
 	
 	t0d = get_time();	
@@ -77,7 +135,19 @@ pos *sga_gpu(   double *imagen,
 	exitOnFail(status, "Unable to create program object.");       
 
 	status = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	exitOnFail(status, "Build failed.");
+	//exitOnFail(status, "Build failed.");
+	if (status != CL_SUCCESS)
+	{
+        printf("Build failed. Error Code=%d\n", status);
+
+		size_t len;
+		char buffer[2048];
+		// get the build log
+		clGetProgramBuildInfo(program, deviceID, CL_PROGRAM_BUILD_LOG,sizeof(buffer), buffer, &len);
+		printf("--- Build Log -- \n %s\n",buffer);
+		//printf("%s\n",kernel_src);
+		exit(1);
+	}
 
 
 	kernel_endmember = clCreateKernel(program, "endmembers_calculation", &status);

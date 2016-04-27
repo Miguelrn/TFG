@@ -185,3 +185,5 @@ __kernel void extrae_endmember(__global int* restrict posiciones,
 	}
 
 }
+
+

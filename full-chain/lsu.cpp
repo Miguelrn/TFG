@@ -1,8 +1,5 @@
 #include "lsu.h"
-//#include "viennacl/linalg/svd.hpp"
-
-
-
+#include "viennacl/coordinate_matrix.hpp"
 
 
 
@@ -41,14 +38,15 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	double auxk;
 
     	//Host
-	boost::numeric::ublas::matrix<double> imagen_Host(sampleLines, bandas);
-	boost::numeric::ublas::matrix<double> endmember_Host(bandas, targets);
-	boost::numeric::ublas::matrix<double> MtM_Host(targets, targets);
-	boost::numeric::ublas::matrix<double> IFS_Host(targets, targets);
-	boost::numeric::ublas::matrix<double> UF_Host(targets, targets);
-	boost::numeric::ublas::matrix<double> IF_Host(targets, targets);
-	boost::numeric::ublas::matrix<double> IF1_Host(targets, targets);
-	boost::numeric::ublas::matrix<double> abundancias_Host(sampleLines, targets);
+	std::vector<std::vector<double> > imagen_vector(sampleLines, std::vector<double>(bandas));
+	std::vector<std::vector<double> > endmember_vector(bandas, std::vector<double>(targets));
+	std::vector<std::vector<double> > MtM_vector(targets, std::vector<double>(targets));
+	std::vector<std::vector<double> > IFS_vector(targets, std::vector<double>(targets));
+	std::vector<std::vector<double> > UF_vector(targets, std::vector<double>(targets));
+	std::vector<std::vector<double> > IF_vector(targets, std::vector<double>(targets));
+	std::vector<std::vector<double> > IF1_vector(targets, std::vector<double>(targets));
+	std::vector<std::vector<double> > abundancias_vector(sampleLines, std::vector<double>(targets));
+	//std::vector<std::map<unsigned int, double> > prueba(sampleLines);
 	double *MtM = (double*)malloc(targets*targets*sizeof(double));
 	double *UF = (double*)malloc(targets*targets*sizeof(double));
 	double *SF = (double*)malloc(targets*sizeof(double));
@@ -59,9 +57,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	double *IF1 = (double*)malloc(targets*targets*sizeof(double));
 	double *Aux = (double*)malloc(targets*sizeof(double));
 	double *abundancias = (double*)malloc((sampleLines*targets)*sizeof(double));
-
-        //boost::numeric::ublas::matrix<double> endmember_Host_aux(bandas, targets);
-
 
 
 
@@ -76,9 +71,13 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	viennacl::matrix<double> IF1_Device(targets, targets);
 	viennacl::matrix<double> abundancias_Device(sampleLines, targets);
 
-	//viennacl::matrix<double> endmember_Device_aux(bandas, targets);
+	viennacl::matrix<double> prueba_Device(sampleLines, targets);
+
+
 
 	double t1Init = get_time();
+
+	
 
 	printf("-----------------------------------------------------------------------\n");
 	printf("                            ViennaCl\n");
@@ -99,11 +98,23 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	//printf("Tiempo divide_norm(host): %f \n", t1-t0);
 
 
+	
+	for (i = 0; i < sampleLines; i++){
+		for (j = 0; j < bandas; j++){
+			imagen_vector[i][j] = imagen[i + j*sampleLines];
+		}
+	}
+	for (i = 0; i < bandas; i++){
+		for (j = 0; j < targets; j++){
+			endmember_vector[i][j] = endmembers[i + j*bandas];
+		}
+	}
+	//he decicido tomar el tiempo de transferencia de la imagen como si viniera en formato vector<vector<double> > puesto que podria leer la imagen en vez de 
+	//double* directamente en formato vector<vector<double> > solo tendria que sobrecargar todas las funciones que se usan en SGA...
+	//asi puedo comparar los tiempos de transferencia con los de Magma
 	t0 = timer.get();
-	for(i = 0; i < sampleLines; i++) for(j = 0; j < bandas; j++) imagen_Host(i,j) = imagen[i + j*sampleLines];
-	for(i = 0; i < bandas; i++) for(j = 0; j < targets; j++) endmember_Host(i,j) = endmembers[i + j*bandas];
-	viennacl::copy(imagen_Host, imagen_Device);
-	viennacl::copy(endmember_Host, endmember_Device);
+	viennacl::copy(imagen_vector, imagen_Device);
+	viennacl::copy(endmember_vector, endmember_Device);
 	t1 = timer.get();
 	tTransfer += t1-t0;
 	printf("Tiempo transfer Host->Device(imagen): %f \n", t1-t0);
@@ -127,8 +138,8 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 */
 
 	t0 = timer.get();
-	viennacl::copy(MtM_Device, MtM_Host);
-	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) MtM[i*targets+j] = MtM_Host(i,j);
+	viennacl::copy(MtM_Device, MtM_vector);
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) MtM[i*targets+j] = MtM_vector[i][j];
 	t1 = timer.get();
 	tTransfer += t1-t0;
 
@@ -136,7 +147,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	dgesvd_("A", "N", &targets, &targets, MtM, &targets, SF, UF, &targets, V, &targets, work, &lwork, &info);
 	t1 = timer.get();
 	tExeCPU += t1-t0;
-	//printf("Tiempo svd: %f \n", t1-t0);
 
 
 	t0 = timer.get();
@@ -146,9 +156,9 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	//printf("Tiempo UFdiag: %f \n", t1-t0);
 
 	t0 = timer.get();
-	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ UF_Host(i,j) = UF[i+j*targets]; IFS_Host(i,j) = IFS[i+j*targets];}
-	viennacl::copy(UF_Host, UF_Device);
-	viennacl::copy(IFS_Host, IFS_Device);
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ UF_vector[i][j] = UF[i+j*targets]; IFS_vector[i][j] = IFS[i+j*targets];}
+	viennacl::copy(UF_vector, UF_Device);
+	viennacl::copy(IFS_vector, IFS_Device);
 	t1 = timer.get();
 	tTransfer += t1-t0;
 	//printf("Tiempo transfer(UF e IFS): %f \n", t1-t0);
@@ -160,12 +170,11 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	tExeGPU += t1-t0;
 	//printf("Tiempo dgemm(IF): %f \n", t1-t0);	
 
-	//std::cout << IF_Device << std::endl;
 
 
 	t0 = timer.get();
-	viennacl::copy(IF_Device, IF_Host);
-	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF[i*targets+j] = IF_Host(i,j);
+	viennacl::copy(IF_Device, IF_vector);
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF[i*targets+j] = IF_vector[i][j];
 	t1 = timer.get();
 	tTransfer += t1-t0;
 
@@ -185,30 +194,30 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 
 	t0 = timer.get();
-	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF1_Host(i,j) = IF1[i*targets+j];
-	viennacl::copy(IF1_Host, IF1_Device);
+	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++) IF1_vector[i][j] = IF1[i*targets+j];
+	viennacl::copy(IF1_vector, IF1_Device);
 	t1 = timer.get();
 	tTransfer += t1-t0;
 
 	t0 = timer.get();
-	abundancias_Device = viennacl::linalg::prod(yy_Device, IF1_Device);//sale transpuesta
+	abundancias_Device = viennacl::linalg::prod(yy_Device, IF1_Device);
 	t1 = timer.get();
 	tExeGPU += t1-t0;
 	//printf("Tiempo dgemm(abundancias): %f \n", t1-t0);
 
 
 	t0 = timer.get();
-	viennacl::copy(abundancias_Device, abundancias_Host);
-	for(i = 0; i < sampleLines; i++) for(j = 0; j < targets; j++) abundancias[i+j*sampleLines] = abundancias_Host(i,j);
+	viennacl::copy(abundancias_Device, abundancias_vector);
+	for(i = 0; i < sampleLines; i++) for(j = 0; j < targets; j++) abundancias[i+j*sampleLines] = abundancias_vector[i][j];
 	t1 = timer.get();
 	tTransfer += t1-t0;	
-	//for(i = 0; i < targets; i++)  printf("%f ", abundancias[i]); printf("\n%f\n",abundancias[sampleLines*targets-1]);
+	//for(i = 0; i < targets; i++)  printf("%f ", abundancias_vector[i][0]); printf("\n%f\n",abundancias_vector[sampleLines-1][targets-1]);//<- borrar
 
 	t0 = timer.get();
 	for (j = 0; j < targets; j++){
 		auxk = Aux[j];
 		for (i = 0; i < sampleLines; i++){
-			abundancias[j*sampleLines+i] = abundancias[j*sampleLines+i] + auxk; 
+			abundancias[j*sampleLines+i] += auxk; 
 		}
 	}
 	t1 = timer.get();
@@ -221,8 +230,9 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
 	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
-	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tTotal-(t1Init-t0Init), tTransfer, (tTransfer*100)/tTotal, tExeCPU, (tExeCPU*100)/tTotal, tExeGPU, (tExeGPU*100)/tTotal);
-	printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
+	double tExe =  tTransfer + tExeCPU + tExeGPU;
+	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
+	printf("\nTotal:	\t\t%.3f (seconds)\n\n",tTotal);
 
 
 
@@ -236,23 +246,13 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 	strcpy(results_filename, filename);
 	strcat(results_filename, "Results.bsq");
-	writeResult(abundancias, results_filename, samples, lines, targets);//estaba al reves
+	writeResult(abundancias, results_filename, samples, lines, targets);
 
 
 	//FREE MEMORY***************************************//
 
 
-	/*free(EtE_Host_aux);
-	free(EtE_Host);
-	free(permutation_Host);
-	free(AUX_Host);
-	free(AUX2_Host);
-	free(I_Host);
-	free(PIXEL_Host);
-	free(endmember_Host);
-	free(imagen_Host);
-
-	free(endmember_Device);
+	/*free(endmember_Device);
 	free(EtE_Device);
 	free(ONE_Device);
 	free(AUX_Device);
@@ -262,6 +262,19 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	free(A_Device);
 	free(B_Device);
 	free(PIXEL_Device);*/
+
+	free(MtM);
+	free(UF);
+	free(SF);
+	free(V);
+	free(work);
+	free(IFS);
+	free(IF);
+	free(IF1);
+	free(Aux);
+
+
+	
 
 
 }
@@ -522,11 +535,11 @@ void lsu_gpu_m(	double *image_Host,
 
 //-------------
 //for(int z = 0; z < targets; z++) printf("%f ",abundancias_h[z]);printf("\n%f\n",abundancias_h[linessamples*targets-1]);
-//---------------
+//-------------
 	dev_time = magma_sync_wtime(queue);	
-	for (k=0; k< targets;k++){
+	for (k = 0; k < targets; k++){
 		auxk = Aux_h[k];
-		for (ii=0;ii<linessamples;ii++){
+		for (ii = 0; ii < linessamples;ii++){
 			abundancias_h[k*linessamples+ii] = abundancias_h[k*linessamples+ii] + auxk;	
 		}
 	}
@@ -537,7 +550,8 @@ void lsu_gpu_m(	double *image_Host,
 
 	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
 	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
-	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tTotal-(t1Init-t0Init), tTransfer, (tTransfer*100)/tTotal, tExeCPU, (tExeCPU*100)/tTotal, tExeGPU, (tExeGPU*100)/tTotal);
+	double tExe =  tTransfer + tExeCPU + tExeGPU;
+	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
 	printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
 
 
@@ -549,7 +563,7 @@ void lsu_gpu_m(	double *image_Host,
 
 	strcpy(results_filename, filename);
 	strcat(results_filename, "Results.bsq");
-	writeResult(abundancias_h, results_filename, lines, samples, targets);
+	writeResult(abundancias_h, results_filename, samples, lines, targets);
 
 
 

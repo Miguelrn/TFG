@@ -20,13 +20,6 @@
 //#include "viennacl/linalg/svd.hpp"
 
 
-//uBlas Headers
-#include <boost/numeric/ublas/matrix.hpp>
-#include <boost/numeric/ublas/io.hpp>
-#include <boost/numeric/ublas/triangular.hpp>
-#include <boost/numeric/ublas/matrix.hpp>
-#include <boost/numeric/ublas/lu.hpp>
-
 
 //ClMagma Library
 #include <magma.h>
