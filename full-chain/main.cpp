@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
 
 	int lines, samples, bands, datatype, i,j;
 	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;//se podria comprobar que lines y linesEnd son iguales... etc
-	cl_device_id deviceID;
+
 	int endmember = 19, error, deviceSelected, librarySelected = 0, maxEndmembers;
 	float probFail;
 	size_t localSize;
@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
 
 	cl_context context;
 	cl_command_queue command_queue;
+	cl_device_id deviceID;
 
 	//Tener menos de 8 argumentos es incorrecto
 	if (argc != 8) {
@@ -75,7 +76,7 @@ int main(int argc, char **argv) {
 	printf("Tiempo de lectura de la Imagen: %f\n",t1-t0);
 
 	t0 = get_time();
-	init_OpenCl(&context, &command_queue, deviceSelected);
+	init_OpenCl(&context, &command_queue, deviceSelected, &deviceID);
 	//init magma
 	//init Viennacl ?
 	t1 = get_time();
@@ -116,7 +117,7 @@ int main(int argc, char **argv) {
 			if(librarySelected == 1)//ViennaCl
 				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
 			else if(librarySelected == 2)//ClMagma
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1]);
 			t1 = get_time();
 			break;
 
@@ -136,7 +137,7 @@ int main(int argc, char **argv) {
 			if(librarySelected == 1)//ViennaCl
 				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
 			else if(librarySelected == 2)//ClMagma
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1]);
 			t1 = get_time();
 
 			break;
@@ -147,27 +148,6 @@ int main(int argc, char **argv) {
 
 
 
-
-
-
-	/*GENE*/
-	//printf("\nojo hasta que no este gene completo se calculara 19 endmembers!!\n\n");
-	
-	/*SGA*/
-
-	//MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
-	/*t0 = get_time();
-	solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, deviceSelected, endmember_bandas_Host, localSize);
-	t1 = get_time();*/
-
-	
-	/*LSU*/
-	/*t0 = get_time();
-	if(librarySelected == 1)//ViennaCl
-		lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
-	else if(librarySelected == 2)//ClMagma
-		lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
-	t1 = get_time();*/
 
 
 
@@ -186,8 +166,8 @@ int main(int argc, char **argv) {
 	free(imagenhdr);
 	free(imagenbsq);
 	//magma_free_cpu(endmember_bandas_Host);//liberarlo despues de usarlo en los case
-	//clReleaseCommandQueue(command_queue);
-    	//clReleaseContext(context);
+	clReleaseCommandQueue(command_queue);
+    	clReleaseContext(context);
 	
 	return 0;
 

@@ -1,7 +1,7 @@
 #include "init_platform.h"
 
 
-void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int deviceSelected){
+void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int deviceSelected, cl_device_id *deviceID){
 
 	cl_uint num_devs_returned;
 	cl_context_properties properties[3];
@@ -11,7 +11,7 @@ void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int devic
     	cl_int status;
 	cl_uint numDevices;
 	cl_platform_id platformID;
-    	cl_device_id deviceID;
+    	//cl_device_id deviceID;
 	int i, j, ok = 0;
 	int isCPU = 0, isGPU = 0, isACCEL = 0;
 
@@ -60,19 +60,19 @@ void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int devic
 	               				if (isCPU && (CL_DEVICE_TYPE_CPU & deviceType)){
 							ok=1;
 	               					platformID = platformIDs[i];
-	              					deviceID = deviceIDs[j];
+	              					*deviceID = deviceIDs[j];
 	               				}
 				       		//GPU device
 				       		if (isGPU && (CL_DEVICE_TYPE_GPU & deviceType)){
 							ok=1;
 							platformID = platformIDs[i];
-							deviceID = deviceIDs[j];
+							*deviceID = deviceIDs[j];
 	                			}
 						//ACCELERATOR device
 	               				if (isACCEL && (CL_DEVICE_TYPE_ACCELERATOR & deviceType)){
 							ok=1;
 							platformID = platformIDs[i];
-							deviceID = deviceIDs[j];
+							*deviceID = deviceIDs[j];
 	                			}
 					}
 	        		}
@@ -85,10 +85,10 @@ void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int devic
 		exit(-1);
 	}
 
-	*context = clCreateContext(NULL, 1, &deviceID, NULL, NULL, &status);//Context
+	*context = clCreateContext(NULL, 1, deviceID, NULL, NULL, &status);//Context
 	exitOnFail( status, "clCreateContext" );
 
-	*command_queue = clCreateCommandQueue(*context, deviceID, CL_QUEUE_PROFILING_ENABLE, &status);
+	*command_queue = clCreateCommandQueue(*context, *deviceID, CL_QUEUE_PROFILING_ENABLE, &status);
     	exitOnFail(status, "Error: Failed to create a command queue!");	
 
 }

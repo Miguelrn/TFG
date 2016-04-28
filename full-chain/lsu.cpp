@@ -23,7 +23,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	}
 
 
-	//std::cout << viennacl::ocl::current_device().info() << std::endl;
+	std::cout << viennacl::ocl::current_device().info() << std::endl;
 
   	viennacl::tools::timer timer;
   	timer.start();
@@ -281,7 +281,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 void lsu_gpu_m(	double *image_Host,
 		double *endmember_Host, 
-		int DeviceSelected,//siempre va ser la GPU se podria eliminar 
+		cl_device_id deviceID,
 		int bands, 
 		int targets, 
 		int lines, 
@@ -302,73 +302,6 @@ void lsu_gpu_m(	double *image_Host,
 	double t0Init = get_time();
 	
 
-
-	// return code used by OpenCL API
-    	cl_int status;
-	unsigned int ok = 0, i, j;
-
-    	// determine number of platforms
-    	cl_uint numPlatforms;
-    	status = clGetPlatformIDs(0, NULL, &numPlatforms); //num_platforms returns the number of OpenCL platforms available
-    	exitOnFail2(status, "number of platforms");
-	
-
-	// get platform IDs
-  	cl_platform_id platformIDs[numPlatforms];
-    	status = clGetPlatformIDs(numPlatforms, platformIDs, NULL); //platformsIDs returns a list of OpenCL platforms found. 
-    	exitOnFail2(status, "get platform IDs");
-
-	cl_uint numDevices;
-	//cl_platform_id platformID;
-        cl_device_id deviceID;
-	
-	//deviceSelected-> 0:CPU, 1:GPU, 2:ACCELERATOR
-	int isCPU = 0, isGPU = 1, isACCEL=0;//usaremos la GPU por defecto
-
-	// iterate over platforms
-	for (i = 0; i < numPlatforms; i++){
-		// determine number of devices for a platform
-		status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, 0, NULL, &numDevices);
-		exitOnFail2(status, "number of devices");
-		if (CL_SUCCESS == status){
-			// get device IDs for a platform
-			//printf("Number of devices: %d\n", numDevices);
-			cl_device_id deviceIDs[numDevices];
-			status = clGetDeviceIDs(platformIDs[i], CL_DEVICE_TYPE_ALL, numDevices, deviceIDs, NULL);
-			if (CL_SUCCESS == status){
-		       		// iterate over devices
-		    		for (j = 0; j < numDevices && !ok; j++){
-		       			cl_device_type deviceType;
-		          		status = clGetDeviceInfo(deviceIDs[j], CL_DEVICE_TYPE, sizeof(cl_device_type), &deviceType, NULL);
-		            		if (CL_SUCCESS == status){
-						//printf("Device Type: %d\n", deviceType);
-						//CPU device
-		               			if (isCPU && (CL_DEVICE_TYPE_CPU & deviceType)){
-							ok=1;
-		               				//platformID = platformIDs[i];
-		              				deviceID = deviceIDs[j];
-		               			}
-		               			//GPU device
-		               			if (isGPU && (CL_DEVICE_TYPE_GPU & deviceType)){
-							ok=1;
-							//platformID = platformIDs[i];
-							deviceID = deviceIDs[j];
-		                		}
-						//ACCELERATOR device
-		               			if (isACCEL && (CL_DEVICE_TYPE_ACCELERATOR & deviceType)){
-							ok=1;
-							//platformID = platformIDs[i];
-							deviceID = deviceIDs[j];
-		                		}
-					}
-		        	}
-		    	}
-		}
-	} 
-	if(!ok){
-		printf("Selected device not found. Program will terminate\n");
-		exit(-1);
-	}
 
 	printf("-----------------------------------------------------------------------\n");
 	printf("                            ClMagma\n");
@@ -595,13 +528,7 @@ void lsu_gpu_m(	double *image_Host,
 }
 
 
-void exitOnFail2(cl_int status, const char* message){
-	if (CL_SUCCESS != status){
-		printf("error: %s\n", message);
-		printf("error: %d\n", status);
-		exit(-1);
-	}
-}
+
 
 double avg_X_2(double *X, int lines_samples, int num_bands){
 
