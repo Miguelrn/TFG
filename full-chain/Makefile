@@ -38,7 +38,7 @@ init_platform.o: init_platform.c
 	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) 
 
 gene.o: gene.cpp
-	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) $(CFLAGS) $(MAGMA_CFLAGS)
+	$(CC) $(OPT) -o $@ -c $< $(CL_VFLAGS) $(CFLAGS) $(MAGMA_CFLAGS) -lgsl
 
 sga.o : sga.c
 	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) -w

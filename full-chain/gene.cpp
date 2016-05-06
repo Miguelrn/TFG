@@ -102,11 +102,15 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 	cl_program program;
 	cl_kernel kernel_mean_pixel;
+	cl_kernel kernel_max_bright;
+	cl_kernel kernel_max_bright_reduce;
+	cl_kernel kernel_pixel_projections;
 
     	cl_int status;
 	cl_ulong start = (cl_ulong) 0;
 	cl_ulong end = (cl_ulong) 0;
 	cl_event ev_mean_pixel;
+	cl_event ev_max_bright;
 
 	int lwork  = bands*bands, info;
 	double alpha = 1.0,beta = 0.0;
@@ -116,11 +120,21 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	int linessamples = lines*samples;
 	int i,j,ok=0;
 	int Nmax_1 = Nmax-1;
+	int pos_abs;
+	double max_bright = 0.0;
+	double r_to_inf = -1;
 
-	double k_mean_pixel = 0.0;
+	double k_mean_pixel = 0.0, k_max_bright = 0.0;
 	size_t global_mean = 256;//ceil((double)samples*lines/256.0)*256.0;
 	size_t local_mean = 256;
+	size_t global_bright = linessamples;
+	size_t local_projections = 256;//por ejemplo...
+	size_t global_projections = ceil(linessamples/local_projections)*local_projections;
 
+	int totalProjections = global_projections/local_projections;
+	double *projections = (double*) malloc (totalProjections * sizeof(double));
+	int *indice = (int*) malloc (totalProjections * sizeof(int));
+	int positions[Nmax][2];
 
 	FILE *fp;
 	long filelen;
@@ -150,21 +164,19 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	exitOnFail(status, "Unable to create program object.");       
 
 	status = clBuildProgram(program, 0, NULL, NULL, NULL, NULL);
-	//exitOnFail(status, "Unable to build program.");
-	if (status != CL_SUCCESS){
-        	printf("Build failed. Error Code=%d\n", status);
-
-		size_t len;
-		char buffer[2048];
-		// get the build log
-		clGetProgramBuildInfo(program, deviceID, CL_PROGRAM_BUILD_LOG,sizeof(buffer), buffer, &len);
-		printf("--- Build Log -- \n %s\n",buffer);
-		//printf("%s\n",kernel_src);
-		exit(1);
-	}
+	exitOnFail(status, "Unable to build program.");
 
 	kernel_mean_pixel = clCreateKernel(program, "mean_pixel", &status);
 	exitOnFail(status, "Unable to create kernel mean_pixel object.");
+
+	kernel_max_bright = clCreateKernel(program, "max_bright", &status);
+	exitOnFail(status, "Unable to create kernel max_bright object.");
+
+	kernel_max_bright_reduce = clCreateKernel(program, "max_bright_reduce", &status);
+	exitOnFail(status, "Unable to create kernel max_bright_reduce object.");
+
+	kernel_pixel_projections = clCreateKernel(program, "pixel_projections", &status);
+	exitOnFail(status, "Unable to create kernel kernel_pixel_projection object.");
 
 
 
@@ -208,7 +220,8 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 
 	//Host
-	double *image_Host, *noise_Host, *rx_true_Host, *work_Host, *s_Host, *c_Host, *cov_image_Host, *cov_noise_Host, *v_Host, *img_reduced_Host;
+	double *image_Host, *noise_Host, *rx_true_Host, *work_Host, *s_Host, *c_Host, *cov_image_Host, *cov_noise_Host, *v_Host, *img_reduced_Host, *umatrix_Host;
+	double *mul_umatrix_Host, *mul_umatrix_inv_Host, *umatrix_aux_Host, *proymatrix_Host, *endmember_Host, *theta_Host, *rw_small_Host;
 	magma_int_t *ipiv_Host;
 	MALLOC_HOST(image_Host, double, linessamples*bands)
 	MALLOC_HOST(noise_Host, double, linessamples*bands)
@@ -221,6 +234,14 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	MALLOC_HOST(v_Host, double, bands*bands)
 	MALLOC_HOST(img_reduced_Host, double, Nmax*linessamples)
 	MALLOC_HOST(ipiv_Host, magma_int_t, Nmax_1)
+	MALLOC_HOST(umatrix_Host, double, Nmax*Nmax)
+	MALLOC_HOST(mul_umatrix_Host, double, Nmax*Nmax)
+	MALLOC_HOST(mul_umatrix_inv_Host, double, Nmax*Nmax)
+	MALLOC_HOST(umatrix_aux_Host, double, Nmax*Nmax)
+	MALLOC_HOST(proymatrix_Host, double, Nmax*Nmax)
+	MALLOC_HOST(endmember_Host, double, Nmax)
+	MALLOC_HOST(theta_Host, double, (Nmax+1)*linessamples)
+	MALLOC_HOST(rw_small_Host, double, Nmax_1*Nmax_1)
 
 
 
@@ -298,9 +319,9 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	end = (cl_ulong) 0;
 	clWaitForEvents(1,&ev_mean_pixel);
 	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel endmember - start");
+	exitOnFail(status, "Profiling kernel mean_pixel - start");
 	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel endmember - end");
+	exitOnFail(status, "Profiling kernel mean_pixel - end");
 	clReleaseEvent(ev_mean_pixel);
 	k_mean_pixel+=(end-start)*1.0e-9;
 
@@ -325,9 +346,9 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	end = (cl_ulong) 0;
 	clWaitForEvents(1,&ev_mean_pixel);
 	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel endmember - start");
+	exitOnFail(status, "Profiling kernel mean_pixel - start");
 	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel endmember - end");
+	exitOnFail(status, "Profiling kernel mean_pixel - end");
 	clReleaseEvent(ev_mean_pixel);
 	k_mean_pixel+=(end-start)*1.0e-9;
 
@@ -366,10 +387,10 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 
 	magma_dgemm(MagmaNoTrans, MagmaTrans, linessamples, Nmax_1, bands, alpha, image_Device, size, linessamples, c_Device, size, bands, beta, img_reduced_Device, size, linessamples, queue);
-	magma_dgetmatrix(Nmax, linessamples, img_reduced_Device, size, Nmax, img_reduced_Host, Nmax, queue);
-	for (i = 0; i < linessamples; i++){
+	magma_dgetmatrix(Nmax, linessamples, img_reduced_Device, size, Nmax, img_reduced_Host, Nmax, queue);//ya lo tengo en device...
+	/*for (i = 0; i < linessamples; i++){//hacer kernel de esto?
 		img_reduced_Host[linessamples*Nmax_1 +i] = 1.0;
-	}
+	}*/
 
 
 	//C'*Cw 
@@ -382,15 +403,198 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	magma_dgetrf_gpu(Nmax_1, Nmax_1, rw_small_Device, size, ldda, ipiv_Host, queue, &info);
 	magma_dgetri_gpu(Nmax_1, rw_small_Device, size, ldda, ipiv_Host, work_Device, size, ldwork, &queue, &info);
 
+	magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, ldda, rw_small_Host, Nmax_1, queue);//lo usa np_test
 
+
+	/*double max = 0.0, min = 0.0;
+	for(i = 0; i < Nmax_1*Nmax_1; i++){
+		if(max < rw_small_Host[i]){
+			max = rw_small_Host[i];
+		}
+		if(min > rw_small_Host[i])
+			min = rw_small_Host[i];
+		
+	}printf("%f - %f\n",max,min);*/
+
+	
 
 	t4 = magma_sync_wtime(queue);
 
+	//---------------------------------------//
+	// ahora empieza el ATGP.
+
+	// The brightest pixel is calculated
+	//pos_abs = Get_pixel_max_bright(image_vector, num_bands,lines_samples);//hacerlo kernel
+	//ya lo tengo en device como img_reduced_Device.... pero no puedo usarlo z.z
+	cl_mem img_reduced_kernel = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double)*linessamples*Nmax, img_reduced_Host, &status);
+	exitOnFail(status, "create buffer img_reduced");
+	cl_mem img_max_bright = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(double)*linessamples, NULL, &status);
+	exitOnFail(status, "create buffer img_max_bright");
+	cl_mem img_projections = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(double)*totalProjections, NULL, &status);
+	exitOnFail(status, "create buffer img_projections");
+	cl_mem indice_projections = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(int)*totalProjections, NULL, &status);
+	exitOnFail(status, "create buffer indice_projections");
+	cl_mem proymatrix_kernel = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(double)*Nmax*Nmax, NULL, &status);
+	exitOnFail(status, "create buffer proymatrix_kernel");
+	
+
+	status = clSetKernelArg(kernel_max_bright, 0, sizeof(cl_mem), &img_reduced_kernel);
+	status |= clSetKernelArg(kernel_max_bright, 1, sizeof(cl_int), &linessamples);
+	status |= clSetKernelArg(kernel_max_bright, 2, sizeof(cl_int), &Nmax);
+    	status |= clSetKernelArg(kernel_max_bright, 3, sizeof(cl_mem), &img_max_bright);
+	exitOnFail(status, "Unable to set kernel max_bright arguments.");
+
+	status = clSetKernelArg(kernel_max_bright_reduce, 0, sizeof(cl_mem), &img_max_bright);
+	status |= clSetKernelArg(kernel_max_bright_reduce, 1, sizeof(cl_int), &linessamples);
+	status |= clSetKernelArg(kernel_max_bright_reduce, 2, sizeof(cl_mem), &indice_projections);
+    	status |= clSetKernelArg(kernel_max_bright_reduce, 3, sizeof(cl_mem), &img_projections);
+	exitOnFail(status, "Unable to set kernel max_bright arguments.");
+
+	status = clSetKernelArg(kernel_pixel_projections, 0, sizeof(cl_mem), &img_reduced_kernel);
+	status = clSetKernelArg(kernel_pixel_projections, 1, sizeof(cl_mem), &proymatrix_kernel);
+	status |= clSetKernelArg(kernel_pixel_projections, 2, sizeof(cl_int), &linessamples);
+	status |= clSetKernelArg(kernel_pixel_projections, 3, sizeof(cl_int), &Nmax);
+    	status |= clSetKernelArg(kernel_pixel_projections, 4, sizeof(cl_mem), &img_max_bright);
+	exitOnFail(status, "Unable to set kernel pixel projections arguments.");
+
+	status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright, 1, NULL, &global_bright, NULL, 0, NULL, &ev_max_bright);//max_bright
+	exitOnFail(status, "Launch OpenCL max_bright kernel");
+	start = (cl_ulong) 0;
+	end = (cl_ulong) 0;
+	clWaitForEvents(1,&ev_max_bright);
+	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+	exitOnFail(status, "Profiling kernel max_bright - start");
+	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+	exitOnFail(status, "Profiling kernel max_bright - end");
+	clReleaseEvent(ev_max_bright);
+	k_max_bright+=(end-start)*1.0e-9;
 
 
+	status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, &ev_max_bright);
+	exitOnFail(status, "Launch OpenCL max_bright_reduction kernel");
+	start = (cl_ulong) 0;
+	end = (cl_ulong) 0;
+	clWaitForEvents(1,&ev_max_bright);
+	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+	exitOnFail(status, "Profiling kernel max_bright_reduction - start");
+	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+	exitOnFail(status, "Profiling kernel max_bright_reduction - end");
+	clReleaseEvent(ev_max_bright);
+	k_max_bright+=(end-start)*1.0e-9;
+
+
+	clEnqueueReadBuffer(command_queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
+	clEnqueueReadBuffer(command_queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
+	
+	
+	for(i = 0; i < totalProjections; i++){
+		if(max_bright < projections[i]){
+			pos_abs = indice[i];
+			max_bright = projections[i];
+		}
+	}
+	//printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona !!!!
+
+	positions[0][0] = pos_abs / samples;
+	positions[0][1] = pos_abs % samples;
+printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona!!
+
+	for (i = 0; i < Nmax_1; i++){
+		umatrix_Host[i]= img_reduced_Host[pos_abs+(i*linessamples)]; //max bright image_vector
+	}
+	umatrix_Host[Nmax_1] = 1;
+
+	i = 1;
+
+	t5 = magma_sync_wtime(queue);
 
 	//---------------------------------------//
-	//---------------------------------------//
+	// Launch the ATGP algorithm to find i-1 targets (the first target is already available)
+	while((r_to_inf <= P_FA) && (i < Nmax)){
+
+		
+		UtxU(umatrix_Host, mul_umatrix_Host, i, Nmax);
+		GaussSeidel_seq(mul_umatrix_Host, mul_umatrix_inv_Host, i);
+		Uxinv(umatrix_Host, mul_umatrix_inv_Host, umatrix_aux_Host, i, Nmax);
+ 		AnsxUt(umatrix_aux_Host, umatrix_Host, proymatrix_Host, i, Nmax);
+		SustractIdentity(proymatrix_Host, Nmax);
+
+		//envio del proymatrix lanzamiento de los dos kernel y lectura y reduccion final
+		status = clEnqueueWriteBuffer(command_queue, proymatrix_kernel, CL_TRUE, 0, sizeof(double) * Nmax * Nmax , proymatrix_Host, 0, NULL, NULL);
+		exitOnFail(status, "Write proymatrix buffer");
+
+		status = clEnqueueNDRangeKernel(command_queue, kernel_pixel_projections, 1, NULL, &global_bright, NULL, 0, NULL, &ev_max_bright);//max_bright
+		exitOnFail(status, "Launch OpenCL pixel_projections kernel");
+		start = (cl_ulong) 0;
+		end = (cl_ulong) 0;
+		clWaitForEvents(1,&ev_max_bright);
+		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+		exitOnFail(status, "Profiling kernel max_bright - start");
+		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+		exitOnFail(status, "Profiling kernel max_bright - end");
+		clReleaseEvent(ev_max_bright);
+		k_max_bright+=(end-start)*1.0e-9;
+
+		status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, &ev_max_bright);
+		exitOnFail(status, "Launch OpenCL max_bright_reduction kernel");
+		start = (cl_ulong) 0;
+		end = (cl_ulong) 0;
+		clWaitForEvents(1,&ev_max_bright);
+		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
+		exitOnFail(status, "Profiling kernel max_bright_reduction - start");
+		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
+		exitOnFail(status, "Profiling kernel max_bright_reduction - end");
+		clReleaseEvent(ev_max_bright);
+		k_max_bright+=(end-start)*1.0e-9;
+
+		clEnqueueReadBuffer(command_queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
+		clEnqueueReadBuffer(command_queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
+	
+		max_bright = 0.0;
+		for(j = 0; j < totalProjections; j++){
+			if(max_bright < projections[j]){
+				pos_abs = indice[j];
+				max_bright = projections[j];
+			}
+		}
+		
+		
+
+		if (i > 2){
+			
+			for(j = 0; j < Nmax; j++){
+				endmember_Host[j] = img_reduced_Host[pos_abs+(j*linessamples)];
+			}
+
+			//Obtener theta
+			lsu_gpu_m(umatrix_Host, endmember_Host, deviceID, Nmax, i, 1, 1, NULL, theta_Host);
+
+
+			//calcular el r_to_inf con el test de newman person
+			r_to_inf = GENE_NP_test(theta_Host, Nmax, i, umatrix_Host, endmember_Host, rw_small_Host);
+		
+		}
+		if ( r_to_inf <= P_FA){
+			
+			positions[i][0]= (pos_abs / samples);
+			positions[i][1]= (pos_abs % samples);	
+		
+			//printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona!!
+
+			if(i < Nmax_1){
+				for(j = 0; j < Nmax_1; j++)
+					umatrix_Host[j+i*Nmax] = img_reduced_Host[pos_abs+j*linessamples];
+				umatrix_Host[Nmax_1+i*bands] = 1;
+				
+			}
+			i++;
+		}
+		
+
+	}
+
+	t5 = magma_sync_wtime(queue);
+
 	//---------------------------------------//
 	//---------------------------------------//
 	//---------------------------------------//
@@ -403,6 +607,11 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	printf("Noise reduction: %f\n",t2-t1);
 	printf("Covarianza: %f\n",t3-t2);
 	printf("stuff: %f\n",t4-t3);
+	printf("ATGP %f\n",t5-t4);
+
+	for (j = 0; j < i; j++){
+		printf("Pos(%2d) = [%d,%d] \n",j,positions[j][0], positions[j][1]);
+	}
 
 //hacer los free MAGMA
 
@@ -416,6 +625,263 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 
 }
+
+
+void UtxU(double *umatrix, double *mul_umatrix, int iter,int num_bands){
+	int j, k, div, aux1, aux2, modulus;
+	double valor;
+	
+	for(j = 0; j < iter*iter; j++){
+		valor=0.0;
+		div=(int)(j/iter);//para que es el cast?
+		aux1=j/iter;
+		aux2=iter*aux1;
+		modulus=j-aux2;
+		for(k=0;k<num_bands;k+=1)
+			valor+=umatrix[k+num_bands*div]*umatrix[k+num_bands*modulus];
+		mul_umatrix[j]=valor;
+	}	
+}
+
+int GaussSeidel_seq (double *matrix, double *inv_matrix, int size){
+	int i;
+	double *ext_matrix;
+	double *ext_matrix_aux;
+	int size_x2 = 2 * size;
+
+	// Reservamos memoria para la matriz y la identidad (extendida)
+	ext_matrix = (double *) malloc (2 * size * size * sizeof (double));
+
+	if (ext_matrix == 0) return -1;
+
+	// Almacena la matriz con la matriz identidad
+	CreateExtMatrix (matrix, ext_matrix, size, size_x2);
+
+	// 1. Diagonal inferior izquierda a cero
+	ProcessLowerLeftDiag (ext_matrix, size, size_x2);
+	// 2. Diagonal superior derecha a cero
+	ProcessUpperRightDiag (ext_matrix, size, size_x2);
+
+	// Normalizar la diagonal para conseguir la matriz identidad a la izquierda
+	ProcessDiag (ext_matrix, size, size_x2);
+
+	// Guardamos la matriz inversa
+	ext_matrix_aux = ext_matrix;
+	for (i = 0; i < size; i++){
+		memcpy (inv_matrix, ext_matrix_aux + size, size * sizeof (double));
+		inv_matrix += size;
+		ext_matrix_aux += size_x2;
+	}
+
+	free (ext_matrix);
+
+	return 0;
+}
+
+void CreateExtMatrix (double* src, double* dest, int size, int size_x2){
+	int i;
+
+	for (i = 0; i < size; i++){
+		memcpy (dest, src, size * sizeof (double));
+		memset (dest + size, 0, size * sizeof (double));
+		dest[i + size] = 1;
+		dest += size_x2;
+		src += size;
+	}
+}
+
+int ProcessLowerLeftDiag (double *matrix, int size, int size_x2){
+	int i, j, k;
+
+	double *last_row_piv = matrix;
+
+	
+	for (i = 0; i < size; i++){//columns
+		for (j = i + 1; j < size; j++){//rows
+			double pivot_aux;
+			double *row_aux = matrix + (j * size_x2);//WTF
+
+			if (last_row_piv[i] == 0){
+				pivot_aux = 0;
+			}
+			else {
+				pivot_aux = row_aux[i] / last_row_piv[i];
+			}
+
+			for (k = 0; k < size_x2; k++){
+				row_aux[k] -= last_row_piv[k] * pivot_aux;
+			}
+		}
+		last_row_piv += size_x2;
+	}
+	return 0;
+}
+
+int ProcessUpperRightDiag (double *matrix, int size, int size_x2){
+	int i, j, k;
+
+	// Puntero a la última fila
+	double *last_row_piv = matrix + size_x2 * (size - 1);
+
+
+	for (i = (size - 1); i > 0; i--){//columns
+
+		for (j = 0; j < i; j++){//rows
+			double pivot_aux;
+			double *row_aux = matrix + (j * size_x2);
+
+			if (last_row_piv[i] == 0){
+				pivot_aux = 0;
+			}
+			else {
+				pivot_aux = row_aux[i] / last_row_piv[i];
+			}
+
+			// Bucle que recorre columna y resta el pivote
+			for (k = 0; k < size_x2; k++){
+				row_aux[k] -= last_row_piv[k] * pivot_aux;
+			}
+		}
+		last_row_piv -= size_x2;
+	}
+	return 0;
+}
+
+
+
+
+void ProcessDiag (double *matrix, int size, int size_x2){
+	int i, j;
+
+	for (i = 0; i < size; i++){
+		double val = matrix[i];
+
+		for (j = 0; j < size_x2; j++)
+			matrix[j] /= val;
+
+		matrix += size_x2;
+	}
+}
+
+void Uxinv(double *umatrix, double *mul_umatrix_inv, double *umatrix_aux, int iter,int num_bands){
+	int j, k, div, aux1, aux2, modulus;
+	double valor;
+
+	for(j=0;j<num_bands*iter;j+=1){
+		valor=0.0;
+		div=(int)(j/iter);
+		aux1=j/iter;
+		aux2=iter*aux1;
+		modulus=j-aux2;
+		for(k=0;k<iter;k+=1)
+			valor+=umatrix[div+num_bands*k]*mul_umatrix_inv[modulus+k*iter];
+		umatrix_aux[j]=valor;			
+	}
+}
+
+void AnsxUt(double *umatrix_aux, double *umatrix, double *proymatrix, int iter, int num_bands){
+	int j, k, div, aux1, aux2, modulus;
+	double valor;
+
+	for(j = 0; j < num_bands*num_bands; j++){
+		valor=0.0;
+		div=(int)(j/num_bands);
+	 	aux1=j/num_bands;
+		aux2=num_bands*aux1;
+		modulus=j-aux2;
+		for(k=0;k<iter;k+=1)
+			valor+=umatrix_aux[k+iter*div]*umatrix[modulus+k*num_bands];
+		proymatrix[j]=valor;			
+	}
+}
+
+void SustractIdentity(double *proymatrix, int num_bands){
+	int j, aux1, aux2, modulus;
+
+	for(j = 0; j < num_bands*num_bands; j++){
+		aux1=j/(num_bands+1);
+		aux2=(num_bands+1)*aux1;
+		modulus=j-aux2;
+
+		if (modulus == 0)
+			proymatrix[j]=1-proymatrix[j];
+		else
+			proymatrix[j]=0-proymatrix[j];
+	}
+}
+
+/// Funcion que realiza el test de newman person con theta y Rsmall y devuelve r_to_inf en el algoritmo gene.
+double GENE_NP_test(double* theta, int Nmax, int i, double* M, double* y, double* invRsmall){
+
+/* OJO AL PARCHE EN VEZ DE CALCULAR INV(VAR_B) todo el rato, lo que hago es calcular la inversa de Rsmall de antemano en invRsmall
+  de tal forma que calculo la inversa  de var_b como invRsmall / (1+zeta) en vez de inverasa((1+zeta) * Rsmall) 
+*/
+
+	double b_vector[Nmax];
+
+	double zeta;
+
+	double var_b[(Nmax-1)* (Nmax-1)];
+
+	double r;
+	double zero_to_r;
+	double r_to_inf;
+
+
+	memcpy(b_vector,y,(Nmax)*sizeof(double));
+
+	double alpha, beta;
+
+	int uno = 1;
+	int  k = 0;
+	int j;
+
+	// theta = a_k-A_k_1*theta_opt;
+
+	alpha = -1,
+	beta = 1;
+	dgemm_("N", "N", &Nmax, &uno, &i, &alpha, M, &Nmax, theta, &i, &beta, b_vector, &Nmax);
+
+
+
+	// zeta = theta'*theta
+	zeta = 0;
+	for (j = 0; j < i;j++){
+		zeta = zeta + theta[j]*theta[j];
+	}
+
+
+	// var_b = (1+zeta) * Rsmall
+	// y calcular la inversa de var_b
+	// OJO en vez de hacer inv ( (1+zeta)*Rsmall ) lo que se hace es inv(Rsmall) / (1+zeta)
+	// así podemos tener la inversa de Rsmall precalculada y ahorrarnos hacer una inversa  en cada iteracion
+
+	for (j = 0; j < (Nmax-1)*(Nmax-1); j++){
+		var_b[j] = invRsmall[j] / (1+zeta);
+	}
+
+
+	///r=(b_vector'*inv(var_b)*b_vector);
+	r = 0;
+	double dot;
+	for (k = 0 ; k < Nmax-1;k++){
+		dot = 0;
+		for (j = 0; j < Nmax-1;j++){
+			dot = dot + var_b[k*(Nmax-1) + j] * b_vector[j];
+		}
+		r = r + dot*b_vector[k];
+	}
+
+	r_to_inf = 1- gsl_sf_gamma_inc_Q((double)r/2, (double)(Nmax-1)/(double)2);
+
+	//printf("it %d, r = %.20f\n",i,r_to_inf);
+	//fflush(stdout);
+
+	return r_to_inf;
+
+}
+
+
 
 
 

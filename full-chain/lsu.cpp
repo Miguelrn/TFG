@@ -286,7 +286,8 @@ void lsu_gpu_m(	double *image_Host,
 		int targets, 
 		int lines, 
 		int samples, 
-		char *filename){
+		char *filename,
+		double *abundancias_h){
 
 	size_t size = 0;
 	double norm_y;
@@ -302,22 +303,30 @@ void lsu_gpu_m(	double *image_Host,
 	double t0Init = get_time();
 	
 
-
-	printf("-----------------------------------------------------------------------\n");
-	printf("                            ClMagma\n");
-	printf("-----------------------------------------------------------------------\n");
+	if(filename != NULL){
+		printf("-----------------------------------------------------------------------\n");
+		printf("                            ClMagma\n");
+		printf("-----------------------------------------------------------------------\n");
+	}
 	//CLMAGMA
-	magma_queue_t  queue;
+	magma_queue_t queue;
 	magma_int_t err;
-	magma_init();//falla ponerle esta funcion??
-	magma_print_environment();	
+	if(filename != NULL){
+		magma_init();//falla ponerle esta funcion??
+		magma_print_environment();
+	}
+		
 	
-
 	err = magma_queue_create( deviceID, &queue );
 	if ( err != 0 ) {
-	  fprintf( stderr, "magma_queue_create failed: %d\n", (int) err );
-	  exit(-1);
+  		fprintf( stderr, "magma_queue_create failed: %d\n", (int) err );
+  		exit(-1);
 	}
+		
+		
+	
+
+	
 	
 
 	//device
@@ -337,7 +346,7 @@ void lsu_gpu_m(	double *image_Host,
 
 
 	//host
-	double *MtM_h, *SF_h, *UF_h, *V_h, *work_h, *IFS_h, *IF_h, *Aux_h, *IF1_h, *abundancias_h;
+	double *MtM_h, *SF_h, *UF_h, *V_h, *work_h, *IFS_h, *IF_h, *Aux_h, *IF1_h;
 	MALLOC_HOST(MtM_h, double, targets*targets)
 	MALLOC_HOST(SF_h, double, targets)
 	MALLOC_HOST(UF_h, double, targets*targets)
@@ -347,7 +356,7 @@ void lsu_gpu_m(	double *image_Host,
 	MALLOC_HOST(IF_h, double, targets*targets)
 	MALLOC_HOST(IF1_h, double, targets*targets)
 	MALLOC_HOST(Aux_h, double, targets)
-	MALLOC_HOST(abundancias_h, double, targets*linessamples)
+	//MALLOC_HOST(abundancias_h, double, targets*linessamples)
 
 	double t1Init = get_time();
 
@@ -389,7 +398,8 @@ void lsu_gpu_m(	double *image_Host,
 //-----------------------
 
 	dev_time = magma_sync_wtime(queue);
-	magma_dgesvd(MagmaAllVec, MagmaNoVec, targets, targets, MtM_h, targets, SF_h, UF_h, targets, V_h, targets, work_h, lwork, queue, &info);
+	dgesvd_("A", "N", &targets, &targets, MtM_h, &targets, SF_h, UF_h, &targets, V_h, &targets, work_h, &lwork, &info);
+	//magma_dgesvd(MagmaAllVec, MagmaNoVec, targets, targets, MtM_h, targets, SF_h, UF_h, targets, V_h, targets, work_h, lwork, queue, &info);
 	tExeGPU += magma_sync_wtime(queue) - dev_time;
 
 
@@ -478,26 +488,30 @@ void lsu_gpu_m(	double *image_Host,
 	}
 	tExeCPU += magma_sync_wtime(queue) - dev_time;
 
-	magma_finalize();
+	
 
 
-	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
-	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
-	double tExe =  tTransfer + tExeCPU + tExeGPU;
-	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
-	printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
+	if(filename != NULL){
+
+		magma_finalize();
+
+		printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
+		double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
+		double tExe =  tTransfer + tExeCPU + tExeGPU;
+		printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
+		printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
+
+	
+		char results_filename[MAXCAD];
+		strcpy(results_filename, filename);
+		strcat(results_filename, "Results.hdr");
+		writeHeader(results_filename, samples, lines, targets);
 
 
-	char results_filename[MAXCAD];
-	strcpy(results_filename, filename);
-	strcat(results_filename, "Results.hdr");
-	writeHeader(results_filename, samples, lines, targets);
-
-
-	strcpy(results_filename, filename);
-	strcat(results_filename, "Results.bsq");
-	writeResult(abundancias_h, results_filename, samples, lines, targets);
-
+		strcpy(results_filename, filename);
+		strcat(results_filename, "Results.bsq");
+		writeResult(abundancias_h, results_filename, samples, lines, targets);
+	}
 
 
 	magma_free(M_d);
@@ -522,7 +536,7 @@ void lsu_gpu_m(	double *image_Host,
 	magma_free_cpu(IF_h);
 	magma_free_cpu(Aux_h);
 	magma_free_cpu(IF1_h);
-	magma_free_cpu(abundancias_h);
+
 
 
 }

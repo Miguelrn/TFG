@@ -7,6 +7,9 @@
 #include <math.h>
 #include <time.h>
 #include <string.h>
+#include "init_platform.h" 
+#include "lsu.h"
+#include <gsl/gsl_sf_gamma.h>
 
 //ClMagma Library
 #include <magma.h>
@@ -29,9 +32,17 @@ if ( MAGMA_SUCCESS !=                                                  \
     exit(-1);                                                          \
 }
 
+void UtxU(double *umatrix, double *mul_umatrix, int iter,int num_bands);
+int GaussSeidel_seq (double *matrix, double *inv_matrix, int size);
+void CreateExtMatrix (double* src, double* dest, int size, int size_x2);
+int ProcessLowerLeftDiag (double *matrix, int size, int size_x2);
+int ProcessUpperRightDiag (double *matrix, int size, int size_x2);
+void ProcessDiag (double *matrix, int size, int size_x2);
+void Uxinv(double *umatrix, double *mul_umatrix_inv, double *umatrix_aux, int iter,int num_bands);
+void AnsxUt(double *umatrix_aux, double *umatrix, double *proymatrix, int iter, int num_bands);
+void SustractIdentity(double *proymatrix, int num_bands);
+double GENE_NP_test(double* theta, int Nmax, int i, double* M, double* y, double* invRsmall);
+void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID);
 
-void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA);
-
-void exitOnFail3(cl_int status, const char* message);
 
 #endif

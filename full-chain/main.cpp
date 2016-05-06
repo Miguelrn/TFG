@@ -83,7 +83,8 @@ int main(int argc, char **argv) {
 
 	switch(argv[7][0]){
 		case 'a':/* GENE */
-			gene_magma(imagen_Host, samples, lines, bands, maxEndmembers, probFail);
+			gene_magma(imagen_Host, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID);
+
 			break;
 
 		case 'b':/* GENE + SCLSU */
@@ -116,8 +117,12 @@ int main(int argc, char **argv) {
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
 				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
-			else if(librarySelected == 2)//ClMagma
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1]);
+			else if(librarySelected == 2){//ClMagma
+				double *abundancias_h;
+				MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				magma_free_cpu(abundancias_h);
+			}
 			t1 = get_time();
 			break;
 
@@ -136,8 +141,12 @@ int main(int argc, char **argv) {
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
 				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
-			else if(librarySelected == 2)//ClMagma
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1]);
+			else if(librarySelected == 2){//ClMagma
+				double *abundancias_h;
+				MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
+				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				magma_free_cpu(abundancias_h);
+			}
 			t1 = get_time();
 
 			break;
@@ -156,9 +165,9 @@ int main(int argc, char **argv) {
 	writeResult(endmember_bandas, imagenbsq, endmember, 1, bands);
 	printf("File with endmembers saved at: %s\n",imagenbsq);*/
 
-	for(i = 0; i < endmember; i++){
+	/*for(i = 0; i < endmember; i++){
 		printf("%d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
-	}
+	}*/
 
 
 	magma_free_cpu(imagen_Host);
