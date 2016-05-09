@@ -21,12 +21,14 @@ int main(int argc, char **argv) {
 	//Variables para calcular el tiempo
 	double t_0,t0, t1, treadImage;
 
-	double *imagen_Host;
+	double *imagen_h;
 	char *tipo = (char*)malloc(MAXCAD*sizeof(char));
 	char *imagenhdr = (char*)malloc(MAXCAD*sizeof(char));
 	char *imagenbsq = (char*)malloc(MAXCAD*sizeof(char));
 	char endmember_file[MAXCAD];
-	double *endmember_bandas_Host;
+	double *endmember_bandas_h;
+	double *umatrix_h;
+	double *abundancias_h;
 
 	int lines, samples, bands, datatype, i,j;
 	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;//se podria comprobar que lines y linesEnd son iguales... etc
@@ -66,12 +68,12 @@ int main(int argc, char **argv) {
 	strcat(imagenhdr, ".hdr");
 	readHeader(imagenhdr, &samples, &lines, &bands, &datatype);
     	printf("Lines = %d  Samples = %d  Nbands = %d  Data_type = %d\n", lines, samples, bands, datatype);
-	MALLOC_HOST(imagen_Host, double, samples*lines*bands)
+	MALLOC_HOST(imagen_h, double, samples*lines*bands)
 
 
 	strcpy(imagenbsq, argv[1]);
 	strcat(imagenbsq, ".bsq");
-	Load_Image(imagenbsq, imagen_Host, samples, lines, bands, datatype);
+	Load_Image(imagenbsq, imagen_h, samples, lines, bands, datatype);
 	t1 = get_time();
 	printf("Tiempo de lectura de la Imagen: %f\n",t1-t0);
 
@@ -83,21 +85,28 @@ int main(int argc, char **argv) {
 
 	switch(argv[7][0]){
 		case 'a':/* GENE */
-			gene_magma(imagen_Host, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID);
-
+			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
+			gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
+			magma_free_cpu(umatrix_h);
 			break;
 
 		case 'b':/* GENE + SCLSU */
+			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
 
+			MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
+			lsu_gpu_m(imagen_h, umatrix_h, deviceID, maxEndmembers, endmember, lines, samples, argv[1], abundancias_h);
+			magma_free_cpu(abundancias_h);
+			magma_free_cpu(umatrix_h);
 			break;
 
 		case 'c':/* SGA */
 			printf("Please indicate how many endmembers need to be found:\n");
 			scanf ("%d",&endmember);
 			fflush(stdin);
-			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
+			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, endmember_bandas_Host, localSize, context, command_queue);
+			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue);
 			t1 = get_time();
 			break;
 
@@ -108,19 +117,19 @@ int main(int argc, char **argv) {
 			strcpy(imagenhdr,endmember_file);
 			strcat(imagenhdr, ".hdr");
 			readHeader(imagenhdr, &samplesEnd, &linesEnd, &bandsEnd, &datatypeEnd);
-			MALLOC_HOST(endmember_bandas_Host, double, linesEnd*bandsEnd)
+			MALLOC_HOST(endmember_bandas_h, double, linesEnd*bandsEnd)
+			//printf("Lines = %d  Samples = %d  Nbands = %d  Data_type = %d\n", linesEnd, samplesEnd, bandsEnd, datatypeEnd);
 
 			strcpy(imagenbsq, endmember_file);
 			strcat(imagenbsq, ".bsq");
-			Load_Image(imagenbsq, endmember_bandas_Host, samplesEnd, linesEnd, bandsEnd, datatypeEnd);
+			Load_Image(imagenbsq, endmember_bandas_h, samplesEnd, linesEnd, bandsEnd, datatypeEnd);
 
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
-				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1]);
 			else if(librarySelected == 2){//ClMagma
-				double *abundancias_h;
-				MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				MALLOC_HOST(abundancias_h, double, linesEnd*lines*samples)
+				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
 				magma_free_cpu(abundancias_h);
 			}
 			t1 = get_time();
@@ -131,20 +140,19 @@ int main(int argc, char **argv) {
 			printf("\nojo hasta que no este gene completo se calculara %d endmembers!!\n\n",endmember);
 	
 			/*SGA*/
-			MALLOC_HOST(endmember_bandas_Host, double, bands*endmember)
+			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_Host, endmember, samples, lines, bands, endmember_bandas_Host, localSize, context, command_queue);
+			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue);
 			t1 = get_time();
 
 
 			/*LSU*/
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
-				lsu_gpu_v(imagen_Host, endmember_bandas_Host, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1]);
 			else if(librarySelected == 2){//ClMagma
-				double *abundancias_h;
 				MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
-				lsu_gpu_m(imagen_Host, endmember_bandas_Host, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
 				magma_free_cpu(abundancias_h);
 			}
 			t1 = get_time();
@@ -159,22 +167,10 @@ int main(int argc, char **argv) {
 
 
 
-
-	/*strcpy(imagenbsq,argv[1]);
-	strcat(imagenbsq, "SGAResult.bsq");
-	writeResult(endmember_bandas, imagenbsq, endmember, 1, bands);
-	printf("File with endmembers saved at: %s\n",imagenbsq);*/
-
-	/*for(i = 0; i < endmember; i++){
-		printf("%d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
-	}*/
-
-
-	magma_free_cpu(imagen_Host);
+	magma_free_cpu(imagen_h);
 	free(tipo);
 	free(imagenhdr);
 	free(imagenbsq);
-	//magma_free_cpu(endmember_bandas_Host);//liberarlo despues de usarlo en los case
 	clReleaseCommandQueue(command_queue);
     	clReleaseContext(context);
 	

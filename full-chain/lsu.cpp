@@ -323,11 +323,7 @@ void lsu_gpu_m(	double *image_Host,
   		exit(-1);
 	}
 		
-		
-	
 
-	
-	
 
 	//device
 	magmaDouble_ptr M_d, Y_d, MtM_d, UF_d, SF_d, V_d, work_d, IFS_d, IF_d, IF1_d, yy_d, X_d;
@@ -346,7 +342,9 @@ void lsu_gpu_m(	double *image_Host,
 
 
 	//host
-	double *MtM_h, *SF_h, *UF_h, *V_h, *work_h, *IFS_h, *IF_h, *Aux_h, *IF1_h;
+	double *image_aux_Host, *endmember_aux_Host, *MtM_h, *SF_h, *UF_h, *V_h, *work_h, *IFS_h, *IF_h, *Aux_h, *IF1_h;
+	MALLOC_HOST(image_aux_Host, double, linessamples*bands)
+	MALLOC_HOST(endmember_aux_Host, double, targets*bands)
 	MALLOC_HOST(MtM_h, double, targets*targets)
 	MALLOC_HOST(SF_h, double, targets)
 	MALLOC_HOST(UF_h, double, targets*targets)
@@ -361,24 +359,22 @@ void lsu_gpu_m(	double *image_Host,
 	double t1Init = get_time();
 
 
+
+	memcpy(endmember_aux_Host, endmember_Host, targets*bands*sizeof(double));
+	memcpy(image_aux_Host, image_Host, linessamples*bands*sizeof(double));
+
+
+
 	dev_time = magma_sync_wtime(queue);
-	norm_y = avg_X_2(image_Host,linessamples,bands);
-	divide_norm(image_Host, endmember_Host, norm_y, linessamples, bands, targets);
+	norm_y = avg_X_2(image_aux_Host,linessamples,bands);
+	divide_norm(image_aux_Host, endmember_aux_Host, norm_y, linessamples, bands, targets);
 	tExeCPU += magma_sync_wtime(queue) - dev_time;
 
 
-//--------------------
-//printf("M\n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",endmember_Host[z]); printf("\n");
-//printf("Y\n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",image_Host[z]); printf("\n");//funciona lol
-//-----------------------
-
 	dev_time = magma_sync_wtime(queue);
-	magma_dsetmatrix(targets, bands, endmember_Host, targets, M_d, size, targets, queue);
-	magma_dsetmatrix(bands, linessamples, image_Host, bands, Y_d, size, bands, queue);
+	magma_dsetmatrix(targets, bands, endmember_aux_Host, targets, M_d, size, targets, queue);
+	magma_dsetmatrix(bands, linessamples, image_aux_Host, bands, Y_d, size, bands, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
-	//printf("transfer image: %f\n",dev_time);
 
 
 	dev_time = magma_sync_wtime(queue);
@@ -389,13 +385,7 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(targets,targets, MtM_d, size, targets, MtM_h, targets, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
-	//printf("dgemm M'*M: %f\n",dev_time);
 
-
-//--------------------
-//printf("dgemm MtM\n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",MtM_h[z]); printf("\n");
-//-----------------------
 
 	dev_time = magma_sync_wtime(queue);
 	dgesvd_("A", "N", &targets, &targets, MtM_h, &targets, SF_h, UF_h, &targets, V_h, &targets, work_h, &lwork, &info);
@@ -406,7 +396,6 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue);
 	magma_dsetmatrix(targets, targets, UF_h, targets, UF_d, size, targets, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
-	//printf("dgesvd: %f\n",dev_time);
 
 
 	dev_time = magma_sync_wtime(queue);
@@ -418,14 +407,6 @@ void lsu_gpu_m(	double *image_Host,
 	magma_dsetmatrix(targets, targets, IFS_h, targets, IFS_d, size, targets, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
 
-//--------------------
-//printf("dgesv (sf_h) \n");
-//for(int z = 0; z < targets; z++) printf("%f ",SF_h[z]); printf("\n");
-//printf("dgesv (uf_h)\n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",UF_h[z]); printf("\n");
-//printf("dgesv \n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",IFS_h[z]); printf("\n");//funciona
-//-----------------------
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaTrans, targets, targets, targets, alpha, IFS_d, size, targets, UF_d, size, targets, beta, IF_d, size, targets, queue);
@@ -435,12 +416,7 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(targets, targets, IF_d, size, targets, IF_h, targets, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
-	//printf("dgemm IFS*UF': %f\n",dev_time);
 
-//--------------------
-//printf("dgemm IF \n");
-//for(int z = 0; z < targets*targets; z++) printf("%f ",IF_h[z]); printf("\n");//funciona
-//-----------------------
 
 	dev_time = magma_sync_wtime(queue);
 	IF1_Aux(IF_h, IF1_h, Aux_h, targets);
@@ -450,16 +426,7 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, bands, alpha, Y_d, size, linessamples, M_d, size, bands, beta, yy_d, size, linessamples, queue);
 	tExeGPU += magma_sync_wtime(queue) - dev_time;
-	//printf("dgemm Y*M: %f\n",dev_time);
 
-//--------------------
-//printf("dgemm Y*M = yy_d\n");
-//double *yyy;
-//MALLOC_HOST(yyy, double, targets*linessamples)
-//magma_dgetmatrix(targets, linessamples, yy_d, size, targets, yyy, targets, queue);
-//for(int z = 0; z < targets*2; z++) printf("%f ",yyy[z]); printf("\n");
-//printf("%f ",yyy[targets*linessamples-1]); printf("\n");
-//-----------------------
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dsetmatrix(targets, targets, IF1_h, targets, IF1_d, size, targets, queue);
@@ -469,16 +436,13 @@ void lsu_gpu_m(	double *image_Host,
 	dev_time = magma_sync_wtime(queue);
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, targets, targets, alpha, yy_d, size, linessamples, IF1_d, size, targets, beta, X_d, size, linessamples, queue);
 	tExeGPU += magma_sync_wtime(queue) - dev_time;
-	//printf("dgemm yy*IF1: %f\n",dev_time);
 
 
 	dev_time = magma_sync_wtime(queue);
 	magma_dgetmatrix(linessamples,targets, X_d, size, linessamples, abundancias_h, linessamples, queue);
 	tTransfer += magma_sync_wtime(queue) - dev_time;
 
-//-------------
-//for(int z = 0; z < targets; z++) printf("%f ",abundancias_h[z]);printf("\n%f\n",abundancias_h[linessamples*targets-1]);
-//-------------
+
 	dev_time = magma_sync_wtime(queue);	
 	for (k = 0; k < targets; k++){
 		auxk = Aux_h[k];
@@ -526,7 +490,8 @@ void lsu_gpu_m(	double *image_Host,
 	magma_free(IF1_d);
 	magma_free(yy_d);
 
-
+	magma_free_cpu(endmember_aux_Host);
+	magma_free_cpu(image_aux_Host);
 	magma_free_cpu(MtM_h);
 	magma_free_cpu(SF_h);
 	magma_free_cpu(UF_h);

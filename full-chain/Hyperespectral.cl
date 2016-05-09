@@ -74,14 +74,14 @@ __global double calculaVolumen(__local double *jointpoint_local,
 
             		ratio = jointpoint_local[j*n+i]/jointpoint_local[i*n+i];
 			barrier(CLK_LOCAL_MEM_FENCE);
-			//if(lidx < n-1){
-				//if(get_local_size(0) < n-1){
+			if(lidx < n-1){
+				if(get_local_size(0) < n-1){
 					for(k = lidx; k < n-1; k+=get_local_size(0)) jointpoint_local[j*n+k] -= ratio * jointpoint_local[i*n+k];//matrix j k
-				//}
-				//else{
-				//	jointpoint_local[j*n+lidx] -= ratio * jointpoint_local[i*n+lidx];//matrix j k
-				//}
-			//}
+				}
+				else{
+					jointpoint_local[j*n+lidx] -= ratio * jointpoint_local[i*n+lidx];//matrix j k
+				}
+			}
 			barrier(CLK_LOCAL_MEM_FENCE);
 			endmember_vector[j] -= ratio * endmember_vector[i];
         	}

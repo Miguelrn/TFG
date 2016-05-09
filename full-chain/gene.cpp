@@ -95,9 +95,105 @@ int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int
 
 
 }
+void SCLSU(double* h_end, double* h_pix, int linessamples, int bands, int targets,double* x ){
 
 
-void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID){
+	////////////
+	//y = sqrt(mean(mean(y.^2))
+	double* M = (double*)malloc(targets*bands*sizeof(double));
+	double* y = (double*)malloc(linessamples*bands*sizeof(double));
+	memcpy(M,h_end,targets*bands*sizeof(double));
+	memcpy(y,h_pix,linessamples*bands*sizeof(double));
+
+	double norm_y;
+	int k,i;
+	double auxk;
+	norm_y = avg_X_2(y,linessamples,bands);
+
+	////////////
+	// y = y/norm_y;
+	// M = M/norm_y;
+	divide_norm(y, M, norm_y,linessamples, bands,  targets);
+
+	//printf("Norm: %.5f\n", norm_y);
+
+	// MtM = M'*M
+	double alpha = 1, beta = 0;
+	double *MtM = (double*)malloc(targets*targets*sizeof(double));
+
+	dgemm_("T", "N", &targets, &targets, &bands, &alpha, M, &bands, M, &bands, &beta, MtM, &targets);
+
+
+	///////
+	////
+	// [UF SF V ] = SVD(MtM) 
+
+	double* UF;
+	double* SF;
+	double* V;
+
+	UF = (double*)malloc(targets*targets*sizeof(double));
+	SF = (double*)malloc(targets*sizeof(double));
+	V = (double*)malloc(targets*targets*sizeof(double));
+	int lwork  = 5*(targets*targets);
+	int info =1;
+	double *work  = (double*)malloc(lwork*sizeof(double));
+
+
+	dgesvd_("A", "N", &targets, &targets, MtM, &targets, SF, UF, &targets, V, &targets, work, &lwork, &info);
+
+
+	/////////////
+	//////
+	// IF = UF*(1/diag(SF+mu))*UF';
+
+	double* IFS = (double*)malloc(targets*targets*sizeof(double));
+	double* IF = (double*)malloc(targets*targets*sizeof(double));
+
+	// IF = UF* (1/diag(SF))
+	UFdiag(UF, SF, IFS, targets,1e-8);
+	// IF = IF *UF';
+
+	dgemm_("N", "T", &targets, &targets, &targets, &alpha, IFS, &targets, UF, &targets, &beta, IF, &targets);
+
+
+	double* IF1 = (double*)malloc(targets*targets*sizeof(double));
+	double* Aux = (double*)malloc(targets*sizeof(double));
+	IF1_Aux(IF,IF1, Aux,targets);
+
+	double *yy = (double*)malloc(targets*linessamples*sizeof(double));
+
+	dgemm_("N", "N", &linessamples, &targets, &bands, &alpha, y, &linessamples, M, &bands, &beta, yy, &linessamples);
+
+	////solution
+	/// x = IF1 * yy + Aux;
+
+	dgemm_("N", "N", &linessamples, &targets, &targets, &alpha, yy, &linessamples, IF1, &targets, &beta, x, &linessamples);
+
+	for (k=0; k< targets;k++){
+		auxk = Aux[k];
+		for (i=0;i<linessamples;i++){
+			x[k*linessamples+i] = x[k*linessamples+i] + auxk; 
+		}
+	}
+
+	free(M);
+	free(y);
+	free(yy);
+	free(IF);
+	free(IFS);
+	free(IF1);
+	free(MtM);
+	free(UF);
+	free(SF);
+	free(V);
+	free(Aux);
+	free(work);
+	
+
+}
+
+int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID, double *umatrix_Host){
 
 
 	cl_program program;
@@ -135,6 +231,10 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	double *projections = (double*) malloc (totalProjections * sizeof(double));
 	int *indice = (int*) malloc (totalProjections * sizeof(int));
 	int positions[Nmax][2];
+
+	int *ipiv = (int*) malloc (Nmax_1*sizeof(int));
+	int lw = Nmax_1*Nmax_1;
+	double *wo = (double*) malloc(lw*sizeof(double));
 
 	FILE *fp;
 	long filelen;
@@ -220,7 +320,7 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 
 	//Host
-	double *image_Host, *noise_Host, *rx_true_Host, *work_Host, *s_Host, *c_Host, *cov_image_Host, *cov_noise_Host, *v_Host, *img_reduced_Host, *umatrix_Host;
+	double *image_Host, *noise_Host, *rx_true_Host, *work_Host, *s_Host, *c_Host, *cov_image_Host, *cov_noise_Host, *v_Host, *img_reduced_Host;
 	double *mul_umatrix_Host, *mul_umatrix_inv_Host, *umatrix_aux_Host, *proymatrix_Host, *endmember_Host, *theta_Host, *rw_small_Host;
 	magma_int_t *ipiv_Host;
 	MALLOC_HOST(image_Host, double, linessamples*bands)
@@ -234,7 +334,6 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	MALLOC_HOST(v_Host, double, bands*bands)
 	MALLOC_HOST(img_reduced_Host, double, Nmax*linessamples)
 	MALLOC_HOST(ipiv_Host, magma_int_t, Nmax_1)
-	MALLOC_HOST(umatrix_Host, double, Nmax*Nmax)
 	MALLOC_HOST(mul_umatrix_Host, double, Nmax*Nmax)
 	MALLOC_HOST(mul_umatrix_inv_Host, double, Nmax*Nmax)
 	MALLOC_HOST(umatrix_aux_Host, double, Nmax*Nmax)
@@ -376,7 +475,7 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 	// Calculamos Rx_true quitando a la covarianza de la imagen la covarianza del ruido.
 	for (i = 0; i < ( bands*bands); i++){
-		rx_true_Host[i] = cov_image_Host[i] - cov_noise_Host[i];
+		rx_true_Host[i] = cov_image_Host[i] - cov_noise_Host[i];//---------------------------------------------------meter en un kernel, ya estaba en device
 		cov_noise_Host[i] /= linessamples;
 	}
 	magma_dsetmatrix(bands, bands, cov_noise_Host, bands, cov_noise_Device, size, bands, queue);
@@ -388,33 +487,32 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 
 	magma_dgemm(MagmaNoTrans, MagmaTrans, linessamples, Nmax_1, bands, alpha, image_Device, size, linessamples, c_Device, size, bands, beta, img_reduced_Device, size, linessamples, queue);
 	magma_dgetmatrix(Nmax, linessamples, img_reduced_Device, size, Nmax, img_reduced_Host, Nmax, queue);//ya lo tengo en device...
-	/*for (i = 0; i < linessamples; i++){//hacer kernel de esto?
-		img_reduced_Host[linessamples*Nmax_1 +i] = 1.0;
-	}*/
 
 
 	//C'*Cw 
 	magma_dgemm(MagmaNoTrans, MagmaNoTrans, Nmax_1, bands, bands, alpha, c_Device, size, bands, cov_noise_Device, size, bands, beta, ctcw_Device, size, Nmax_1, queue);
 
 	//C'*Cw*C 
-	magma_dgemm(MagmaNoTrans, MagmaTrans, Nmax_1, Nmax_1, bands, alpha, ctcw_Device, size, Nmax_1, c_Device, size, bands, beta, rw_small_Device, size, ldda, queue);
+	magma_dgemm(MagmaNoTrans, MagmaTrans, Nmax_1, Nmax_1, bands, alpha, ctcw_Device, size, Nmax_1, c_Device, size, bands, beta, rw_small_Device, size, Nmax_1, queue);
 
 
-	magma_dgetrf_gpu(Nmax_1, Nmax_1, rw_small_Device, size, ldda, ipiv_Host, queue, &info);
-	magma_dgetri_gpu(Nmax_1, rw_small_Device, size, ldda, ipiv_Host, work_Device, size, ldwork, &queue, &info);
 
-	magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, ldda, rw_small_Host, Nmax_1, queue);//lo usa np_test
+	magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, Nmax_1, rw_small_Host, Nmax_1, queue);
 
 
-	/*double max = 0.0, min = 0.0;
-	for(i = 0; i < Nmax_1*Nmax_1; i++){
-		if(max < rw_small_Host[i]){
-			max = rw_small_Host[i];
-		}
-		if(min > rw_small_Host[i])
-			min = rw_small_Host[i];
-		
-	}printf("%f - %f\n",max,min);*/
+	dgetrf_(&Nmax_1, &Nmax_1, rw_small_Host, &Nmax_1, ipiv, &info);
+	dgetri_(&Nmax_1, rw_small_Host, &Nmax_1, ipiv, wo, &lw, &info);
+
+
+
+	//magma_dgetrf_gpu(Nmax_1, Nmax_1, rw_small_Device, size, ldda, ipiv_Host, queue, &info);
+	//magma_dgetri_gpu(Nmax_1, rw_small_Device, size, ldda, ipiv_Host, work_Device, size, ldwork, &queue, &info);//no funciona correctamente
+
+	//magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, ldda, rw_small_Host, Nmax_1, queue);//lo usa np_test
+
+
+
+
 
 	
 
@@ -424,7 +522,6 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 	// ahora empieza el ATGP.
 
 	// The brightest pixel is calculated
-	//pos_abs = Get_pixel_max_bright(image_vector, num_bands,lines_samples);//hacerlo kernel
 	//ya lo tengo en device como img_reduced_Device.... pero no puedo usarlo z.z
 	cl_mem img_reduced_kernel = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double)*linessamples*Nmax, img_reduced_Host, &status);
 	exitOnFail(status, "create buffer img_reduced");
@@ -493,20 +590,23 @@ void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int 
 			max_bright = projections[i];
 		}
 	}
-	//printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona !!!!
+
 
 	positions[0][0] = pos_abs / samples;
 	positions[0][1] = pos_abs % samples;
-printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona!!
+
 
 	for (i = 0; i < Nmax_1; i++){
-		umatrix_Host[i]= img_reduced_Host[pos_abs+(i*linessamples)]; //max bright image_vector
+		umatrix_Host[i]= img_reduced_Host[pos_abs+(i*linessamples)];
 	}
 	umatrix_Host[Nmax_1] = 1;
+
+
 
 	i = 1;
 
 	t5 = magma_sync_wtime(queue);
+
 
 	//---------------------------------------//
 	// Launch the ATGP algorithm to find i-1 targets (the first target is already available)
@@ -558,49 +658,41 @@ printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funci
 			}
 		}
 		
-		
 
 		if (i > 2){
 			
-			for(j = 0; j < Nmax; j++){
+			for(j = 0; j < Nmax_1; j++){
 				endmember_Host[j] = img_reduced_Host[pos_abs+(j*linessamples)];
 			}
+			endmember_Host[Nmax_1] = 1;
 
 			//Obtener theta
-			lsu_gpu_m(umatrix_Host, endmember_Host, deviceID, Nmax, i, 1, 1, NULL, theta_Host);
-
+			lsu_gpu_m(endmember_Host, umatrix_Host, deviceID, Nmax, i, 1, 1, NULL, theta_Host);
 
 			//calcular el r_to_inf con el test de newman person
 			r_to_inf = GENE_NP_test(theta_Host, Nmax, i, umatrix_Host, endmember_Host, rw_small_Host);
+
 		
 		}
-		if ( r_to_inf <= P_FA){
+		if (r_to_inf <= P_FA){
 			
-			positions[i][0]= (pos_abs / samples);
-			positions[i][1]= (pos_abs % samples);	
+			positions[i][0] = (pos_abs / samples);
+			positions[i][1] = (pos_abs % samples);	
 		
-			//printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funciona!!
 
 			if(i < Nmax_1){
 				for(j = 0; j < Nmax_1; j++)
 					umatrix_Host[j+i*Nmax] = img_reduced_Host[pos_abs+j*linessamples];
-				umatrix_Host[Nmax_1+i*bands] = 1;
-				
+				umatrix_Host[Nmax_1+i*Nmax] = 1;
 			}
 			i++;
 		}
 		
 
-	}
+	}//end while
 
 	t5 = magma_sync_wtime(queue);
 
-	//---------------------------------------//
-	//---------------------------------------//
-	//---------------------------------------//
-	//---------------------------------------//
-	//---------------------------------------//
-	//---------------------------------------//
 	//---------------------------------------//
 
 	printf("Init: %f\n",t1-t0);
@@ -609,21 +701,53 @@ printf("%d = (%d - %d)\n",pos_abs, pos_abs / samples, pos_abs % samples);//funci
 	printf("stuff: %f\n",t4-t3);
 	printf("ATGP %f\n",t5-t4);
 
+
 	for (j = 0; j < i; j++){
 		printf("Pos(%2d) = [%d,%d] \n",j,positions[j][0], positions[j][1]);
 	}
 
-//hacer los free MAGMA
 
+	//hacer los free MAGMA
 	clFinish(command_queue);
+	magma_finalize();
 
 	clReleaseProgram(program);
 	clReleaseKernel(kernel_mean_pixel);
 
+	magma_free_cpu(image_Host);
+	magma_free_cpu(noise_Host);
+	magma_free_cpu(rx_true_Host);
+	magma_free_cpu(work_Host);
+	magma_free_cpu(s_Host);
+	magma_free_cpu(c_Host);
+	magma_free_cpu(cov_image_Host);
+	magma_free_cpu(cov_noise_Host);
+	magma_free_cpu(v_Host);
+	magma_free_cpu(img_reduced_Host);
+	magma_free_cpu(mul_umatrix_Host);
+	magma_free_cpu(mul_umatrix_inv_Host);
+	magma_free_cpu(umatrix_aux_Host);
+	magma_free_cpu(proymatrix_Host);
+	//magma_free_cpu(endmember_Host);
+	magma_free_cpu(theta_Host);
+	//magma_free_cpu(rw_small_Host);
+	magma_free_cpu(ipiv_Host);
+
+	magma_free(image_Device);
+	magma_free(noise_Device);
+	magma_free(c_Device);
+	magma_free(cov_image_Device);
+	magma_free(cov_noise_Device);
+	magma_free(img_reduced_Device);
+	magma_free(ctcw_Device);
+	magma_free(rw_small_Device);
+	magma_free(work_Device);
 
 	free(kernel_src);
+	free(wo);
+	free(ipiv);
 
-
+	return i-1;//guardamos el max numero de endmembers para SCLSU
 }
 
 

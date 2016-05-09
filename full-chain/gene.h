@@ -42,7 +42,9 @@ void Uxinv(double *umatrix, double *mul_umatrix_inv, double *umatrix_aux, int it
 void AnsxUt(double *umatrix_aux, double *umatrix, double *proymatrix, int iter, int num_bands);
 void SustractIdentity(double *proymatrix, int num_bands);
 double GENE_NP_test(double* theta, int Nmax, int i, double* M, double* y, double* invRsmall);
-void gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID);
+
+int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID, double *umatrix_Host);
+int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int bands, magmaDouble_ptr noise_Device, magma_queue_t queue);
 
 
 #endif
