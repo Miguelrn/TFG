@@ -132,4 +132,10 @@ __kernel void mean_pixel(__global double *imageInOut,
 }
 
 
+__kernel void prueba(__global double *A){
+	const int gidx = get_global_id(0);
+	
+	A[gidx] = 2*A[gidx];
+}
+
 

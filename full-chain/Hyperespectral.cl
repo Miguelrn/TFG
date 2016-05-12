@@ -2,8 +2,6 @@
 __global double calculaVolumen(__local double *jointpoint_local, double *endmember_vector, int n, int factorial);
 
 #define size 31
-#define matrixSize (size+1)*(size+1)
-
 
 
 
@@ -23,6 +21,7 @@ __kernel void endmembers_calculation(
 
 	const int lidx = get_local_id(0);
 	const int gidx = get_group_id(0)*get_local_size(0) + get_local_id(0);//get global id
+	const int local_size = get_local_size(0);
 
 	const int lenght = n+1;
 	
@@ -33,12 +32,11 @@ __kernel void endmembers_calculation(
 		endmember_vector[0] = 1.0;
 		for(i = 0; i < n; i++) endmember_vector[i+1] = ImageIn[gidx + muestras*lineas*i];
 
-		for(i = lidx; i < lenght * lenght; i += get_local_size(0)){
+		for(i = lidx; i < lenght * lenght; i += local_size){
 			if(i < lenght) jointpoint_local[i] = 1.0;
 			else jointpoint_local[i] = ImageIn[posiciones[(i%lenght)*2] + posiciones[(i%lenght)*2+1]*muestras + muestras*lineas*(i/lenght-1)];
 		}
 
-		
 
 		int factorial = 1;
 
@@ -66,7 +64,6 @@ __global double calculaVolumen(__local double *jointpoint_local,
 	const int gidx = get_global_id(0);
 	const int lidx = get_local_id(0);
 	
-
 
     	for(i = 0; i < n; i++){//columnas
 
@@ -103,6 +100,7 @@ __global double calculaVolumen(__local double *jointpoint_local,
 		return (-determinante);
 	else 
 		return determinante;
+
 }
 
 
@@ -117,11 +115,11 @@ __kernel void reduce(
 			const int width,
 			const int height){
 
-	//const int width = get_global_size(0);
+	
 	const int local_width = get_local_size(0);
   	const int gidx = get_global_id(0);
   	const int lidx = get_local_id(0);
-	//const int height = widtheight/width;
+	
 
 	int global_index = gidx, i, j;
 	double maximo = 0;

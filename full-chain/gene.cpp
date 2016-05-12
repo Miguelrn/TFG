@@ -5,193 +5,7 @@
 
 
 
-int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int bands, magmaDouble_ptr noise_Device, magma_queue_t queue){
 
-	int info;
-	double alpha = 1, beta = 0;
-	int lwork = bands*bands;
-	int i = 0, j = 0, b = 0;
-	int uno = 1;
-	size_t size = 0;
-
-	//Device
-	magmaDouble_ptr rr_Device, beta_Device;
-	MALLOC_DEVICE(rr_Device, double, bands*bands)
-	MALLOC_DEVICE(beta_Device, double, bands*bands)
-	
-	//Host
-	double *rr_Host, *rri_Host, *xx_Host, *rra_Host, *beta_Host, *work_Host;
-	magma_int_t *ipiv_Host;
-	MALLOC_HOST(rr_Host, double, bands*bands)
-	MALLOC_HOST(rri_Host, double, bands*bands) 
-	MALLOC_HOST(xx_Host, double, bands*bands) 
-	MALLOC_HOST(rra_Host, double, bands) 
-	MALLOC_HOST(beta_Host, double, bands*bands) 
-	MALLOC_HOST(ipiv_Host, magma_int_t, bands) 
-	MALLOC_HOST(work_Host, double, bands*bands) 
-
-
-
-	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, size, linessamples, image_Device, size, linessamples, beta,  rr_Device, size, bands, queue);
-
-	magma_dgetmatrix(bands, bands, rr_Device, size, bands, rr_Host, bands, queue);
-
-
-
-	for (i = 0; i < bands; i++){
-		rr_Host[i*bands + i] = rr_Host[i*bands + i]  + 1e-6;
-	}
-
-	memcpy(rri_Host, rr_Host, bands*bands*sizeof(double));
-
-	lapackf77_dgetrf(&bands, &bands, rri_Host, &bands, ipiv_Host, &info);
-	lapackf77_dgetri(&bands, rri_Host, &bands, ipiv_Host, work_Host, &lwork, &info);
-
-
-	for (b = 0; b < bands; b++){//se podria mirar si interesa usar magma
-		for (i = 0; i < bands; i++){
-			for (j = 0; j < bands;j++){
-				xx_Host[i*bands +j] = rri_Host[i*bands +j] - ( (rri_Host[i*bands+b] * rri_Host[b*bands+j]) / rri_Host[b*bands + b]);
-			}
-			if ( i == b)
-				rra_Host[i] = 0;
-			else
-				rra_Host[i] = rr_Host[i*bands + b]; 
-		}
-
-		dgemm_("N", "N", &uno, &bands, &bands, &alpha, rra_Host, &uno, xx_Host, &bands, &beta, &(beta_Host[b*bands]), &uno);//no interesa llevarlo
-
-		beta_Host[b*bands+b] = 0;
-	}
-
-
-	//OJO AL PARCHE HE SACAO la w fuera del bucle, voy guardando los beta en una matriz, un vector beta por cada banda
-	// y al final calculo el ruido w = r - beta'*r;
-	// ojo: dgemm_ hace alpha*A*B + beta*C que equivale a -1 * beta'*r + r;
-	// es decir alpha = -1 beta = 1 C inicializa con la banda de la imagen (ya esta en memcpy arriba)
-	// asi esta operacion se hace solo con un dgemm en vez de varios dgemm uno por cada banda, 
-	// esto es para meterlo luego en GPU con cublas va todo mucho mas rapido con un solo degemm
-	alpha = -1;
-	beta = 1;
-
-	magma_dsetmatrix(bands, bands, beta_Host, bands, beta_Device, size, bands, queue);
-	//memcpy(noise_Device, image_Device, linessamples*bands*sizeof(double));//VV
-	magma_dsetmatrix(linessamples, bands, image, linessamples, noise_Device, size, linessamples, queue);
-
-	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, bands, bands, alpha, image_Device, size, linessamples, beta_Device, size, bands, beta, noise_Device, size, linessamples, queue);
-
-
-
-	magma_free_cpu(rr_Host);
-	magma_free_cpu(rri_Host);
-	magma_free_cpu(xx_Host);
-	magma_free_cpu(rra_Host);
-	magma_free_cpu(beta_Host);
-	magma_free_cpu(ipiv_Host);
-	magma_free_cpu(work_Host);
-
-	magma_free(rr_Device);
-	magma_free(beta_Device);
-
-
-}
-void SCLSU(double* h_end, double* h_pix, int linessamples, int bands, int targets,double* x ){
-
-
-	////////////
-	//y = sqrt(mean(mean(y.^2))
-	double* M = (double*)malloc(targets*bands*sizeof(double));
-	double* y = (double*)malloc(linessamples*bands*sizeof(double));
-	memcpy(M,h_end,targets*bands*sizeof(double));
-	memcpy(y,h_pix,linessamples*bands*sizeof(double));
-
-	double norm_y;
-	int k,i;
-	double auxk;
-	norm_y = avg_X_2(y,linessamples,bands);
-
-	////////////
-	// y = y/norm_y;
-	// M = M/norm_y;
-	divide_norm(y, M, norm_y,linessamples, bands,  targets);
-
-	//printf("Norm: %.5f\n", norm_y);
-
-	// MtM = M'*M
-	double alpha = 1, beta = 0;
-	double *MtM = (double*)malloc(targets*targets*sizeof(double));
-
-	dgemm_("T", "N", &targets, &targets, &bands, &alpha, M, &bands, M, &bands, &beta, MtM, &targets);
-
-
-	///////
-	////
-	// [UF SF V ] = SVD(MtM) 
-
-	double* UF;
-	double* SF;
-	double* V;
-
-	UF = (double*)malloc(targets*targets*sizeof(double));
-	SF = (double*)malloc(targets*sizeof(double));
-	V = (double*)malloc(targets*targets*sizeof(double));
-	int lwork  = 5*(targets*targets);
-	int info =1;
-	double *work  = (double*)malloc(lwork*sizeof(double));
-
-
-	dgesvd_("A", "N", &targets, &targets, MtM, &targets, SF, UF, &targets, V, &targets, work, &lwork, &info);
-
-
-	/////////////
-	//////
-	// IF = UF*(1/diag(SF+mu))*UF';
-
-	double* IFS = (double*)malloc(targets*targets*sizeof(double));
-	double* IF = (double*)malloc(targets*targets*sizeof(double));
-
-	// IF = UF* (1/diag(SF))
-	UFdiag(UF, SF, IFS, targets,1e-8);
-	// IF = IF *UF';
-
-	dgemm_("N", "T", &targets, &targets, &targets, &alpha, IFS, &targets, UF, &targets, &beta, IF, &targets);
-
-
-	double* IF1 = (double*)malloc(targets*targets*sizeof(double));
-	double* Aux = (double*)malloc(targets*sizeof(double));
-	IF1_Aux(IF,IF1, Aux,targets);
-
-	double *yy = (double*)malloc(targets*linessamples*sizeof(double));
-
-	dgemm_("N", "N", &linessamples, &targets, &bands, &alpha, y, &linessamples, M, &bands, &beta, yy, &linessamples);
-
-	////solution
-	/// x = IF1 * yy + Aux;
-
-	dgemm_("N", "N", &linessamples, &targets, &targets, &alpha, yy, &linessamples, IF1, &targets, &beta, x, &linessamples);
-
-	for (k=0; k< targets;k++){
-		auxk = Aux[k];
-		for (i=0;i<linessamples;i++){
-			x[k*linessamples+i] = x[k*linessamples+i] + auxk; 
-		}
-	}
-
-	free(M);
-	free(y);
-	free(yy);
-	free(IF);
-	free(IFS);
-	free(IF1);
-	free(MtM);
-	free(UF);
-	free(SF);
-	free(V);
-	free(Aux);
-	free(work);
-	
-
-}
 
 int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID, double *umatrix_Host){
 
@@ -346,34 +160,36 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 
 //---------------------------------------------------------------------------------------------
 //                                     Pruebas
-	/*int filas = 3, columnas = 3;
+/*	int row = 3, col = 3;
 	double *A_h, *B_h;
 	cl_mem A_k, B_k;
-	magma_malloc(&A_k, filas*columnas*sizeof(double));
-	magma_malloc(&B_k, filas*columnas*sizeof(double));
-	magma_malloc_cpu((void**) &A_h, filas*columnas*sizeof(double));
-	magma_malloc_cpu((void**) &B_h, filas*columnas*sizeof(double));
-	for(int z = 0; z < filas*columnas; z++) A_h[z] = z+1;
-	for(int z = 0; z < filas*columnas; z++) printf("%f ",A_h[z]); printf("\n");
+	magma_malloc(&A_k, row*col*sizeof(double));
+	magma_malloc(&B_k, row*col*sizeof(double));
+	magma_malloc_cpu((void**) &A_h, row*col*sizeof(double));
+	magma_malloc_cpu((void**) &B_h, row*col*sizeof(double));
+	for(int z = 0; z < row*col; z++) A_h[z] = z+1;
+	for(int z = 0; z < row*col; z++) printf("%f ",A_h[z]); printf("\n");
 
-	magma_dsetmatrix(filas, columnas, A_h, filas, A_k, size, filas, queue);
-	magma_dgemm(MagmaNoTrans, MagmaTrans, filas, filas, columnas, alpha, A_k, size, filas, A_k, size, filas, beta, B_k, size, filas, queue);
-	magma_dgetmatrix(filas,columnas, B_k, size, filas, B_h, filas, queue);
+	magma_dsetmatrix(row, col, A_h, row, A_k, size, row, queue);
+	magma_dgemm(MagmaNoTrans, MagmaTrans, row, row, col, alpha, A_k, size, row, A_k, size, row, beta, B_k, size, row, queue);
+	magma_dgetmatrix(row,col, B_k, size, row, B_h, row, queue);
 
-	for(int z = 0; z < filas*columnas; z++) printf("%f ",B_h[z]); printf("\n");//hasta aqui hemos usado un cl_mem como magma pointer -> ok!
-//--
+	for(int z = 0; z < row*col; z++) printf("%f ",B_h[z]); printf("\n");//working 
+
+
 	cl_kernel k_prueba;
 	k_prueba = clCreateKernel(program, "prueba", &status);
 	
 	status = clSetKernelArg(k_prueba, 0, sizeof(cl_mem), &A_k);
-	exitOnFail(status, "Unable to set kernel prueba arguments.");
+	exitOnFail(status, "Unable to set kernel prueba arguments.");//fail error -38
 
-	size_t global_prueba = 9;
+	size_t global_prueba = row*col;
 	status = clEnqueueNDRangeKernel(command_queue, k_prueba, 1, NULL, &global_prueba, NULL, 0, NULL, NULL);
 	exitOnFail(status, "Launch OpenCL prueba kernel");
 
-	magma_dgetmatrix(filas,columnas, A_k, size, filas, A_h, filas, queue);
-	for(int z = 0; z < filas*columnas; z++) printf("%f ",A_h[z]); printf("\n");*/
+	magma_dgetmatrix(row, col, A_k, size, row, A_h, row, queue);
+	for(int z = 0; z < row*col; z++) printf("%f ",A_h[z]); printf("\n");
+*/
 
 
 
@@ -749,6 +565,99 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 
 	return i-1;//guardamos el max numero de endmembers para SCLSU
 }
+
+
+int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int bands, magmaDouble_ptr noise_Device, magma_queue_t queue){
+
+	int info;
+	double alpha = 1, beta = 0;
+	int lwork = bands*bands;
+	int i = 0, j = 0, b = 0;
+	int uno = 1;
+	size_t size = 0;
+
+	//Device
+	magmaDouble_ptr rr_Device, beta_Device;
+	MALLOC_DEVICE(rr_Device, double, bands*bands)
+	MALLOC_DEVICE(beta_Device, double, bands*bands)
+	
+	//Host
+	double *rr_Host, *rri_Host, *xx_Host, *rra_Host, *beta_Host, *work_Host;
+	magma_int_t *ipiv_Host;
+	MALLOC_HOST(rr_Host, double, bands*bands)
+	MALLOC_HOST(rri_Host, double, bands*bands) 
+	MALLOC_HOST(xx_Host, double, bands*bands) 
+	MALLOC_HOST(rra_Host, double, bands) 
+	MALLOC_HOST(beta_Host, double, bands*bands) 
+	MALLOC_HOST(ipiv_Host, magma_int_t, bands) 
+	MALLOC_HOST(work_Host, double, bands*bands) 
+
+
+
+	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, size, linessamples, image_Device, size, linessamples, beta,  rr_Device, size, bands, queue);
+
+	magma_dgetmatrix(bands, bands, rr_Device, size, bands, rr_Host, bands, queue);
+
+
+
+	for (i = 0; i < bands; i++){
+		rr_Host[i*bands + i] = rr_Host[i*bands + i]  + 1e-6;
+	}
+
+	memcpy(rri_Host, rr_Host, bands*bands*sizeof(double));
+
+	lapackf77_dgetrf(&bands, &bands, rri_Host, &bands, ipiv_Host, &info);
+	lapackf77_dgetri(&bands, rri_Host, &bands, ipiv_Host, work_Host, &lwork, &info);
+
+
+	for (b = 0; b < bands; b++){//se podria mirar si interesa usar magma
+		for (i = 0; i < bands; i++){
+			for (j = 0; j < bands;j++){
+				xx_Host[i*bands +j] = rri_Host[i*bands +j] - ( (rri_Host[i*bands+b] * rri_Host[b*bands+j]) / rri_Host[b*bands + b]);
+			}
+			if ( i == b)
+				rra_Host[i] = 0;
+			else
+				rra_Host[i] = rr_Host[i*bands + b]; 
+		}
+
+		dgemm_("N", "N", &uno, &bands, &bands, &alpha, rra_Host, &uno, xx_Host, &bands, &beta, &(beta_Host[b*bands]), &uno);//no interesa llevarlo
+
+		beta_Host[b*bands+b] = 0;
+	}
+
+
+	//OJO AL PARCHE HE SACAO la w fuera del bucle, voy guardando los beta en una matriz, un vector beta por cada banda
+	// y al final calculo el ruido w = r - beta'*r;
+	// ojo: dgemm_ hace alpha*A*B + beta*C que equivale a -1 * beta'*r + r;
+	// es decir alpha = -1 beta = 1 C inicializa con la banda de la imagen (ya esta en memcpy arriba)
+	// asi esta operacion se hace solo con un dgemm en vez de varios dgemm uno por cada banda, 
+	// esto es para meterlo luego en GPU con cublas va todo mucho mas rapido con un solo degemm
+	alpha = -1;
+	beta = 1;
+
+	magma_dsetmatrix(bands, bands, beta_Host, bands, beta_Device, size, bands, queue);
+	//memcpy(noise_Device, image_Device, linessamples*bands*sizeof(double));//VV
+	magma_dsetmatrix(linessamples, bands, image, linessamples, noise_Device, size, linessamples, queue);
+
+	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, bands, bands, alpha, image_Device, size, linessamples, beta_Device, size, bands, beta, noise_Device, size, linessamples, queue);
+
+
+
+	magma_free_cpu(rr_Host);
+	magma_free_cpu(rri_Host);
+	magma_free_cpu(xx_Host);
+	magma_free_cpu(rra_Host);
+	magma_free_cpu(beta_Host);
+	magma_free_cpu(ipiv_Host);
+	magma_free_cpu(work_Host);
+
+	magma_free(rr_Device);
+	magma_free(beta_Device);
+
+
+}
+
 
 
 void UtxU(double *umatrix, double *mul_umatrix, int iter,int num_bands){

@@ -38,11 +38,11 @@ pos *sga_gpu(   double *imagen,
 	cl_ulong start=(cl_ulong)0;
 	cl_ulong end=(cl_ulong)0;
 	cl_event ev_endmember, ev_reduce, ev_extrae, ev_memcpy;
-	//size_t localSize = 64, local_size_size;//probar a traerlo por parametro??
 	size_t global;
 	global = ceil(muestras*lineas/(int)localSize)*localSize;//muestras*lineas;
-	size_t globalSize_reduction = localSize;//muestras...si es muy pequeño igual interesa ponerlo en cpu la reduccion final
+	size_t globalSize_reduction = localSize;
 	size_t globalSize_extraccion = bandas;
+	double *volumenCPU = (double*) calloc (muestras * lineas, sizeof(double));
 
 	double t0d, t1d, t1fin, t_ram, t_device;
 	double k_endmember = 0.0, k_reduce = 0.0, k_extrae = 0.0, read = 0.0, write = 0.0, tTotal = 0.0, tRamDevice=0.0;
@@ -101,7 +101,7 @@ pos *sga_gpu(   double *imagen,
 	t_device = get_time();
 	//printf("\nTotal RAM->DEVICE:	\t%.5f (seconds)\n", t_device-t_ram);		
 
-	volumen = clCreateBuffer(context,  CL_MEM_READ_WRITE,  sizeof(double) * muestras * lineas, NULL, &status);
+	volumen = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,  sizeof(double) * muestras * lineas, volumenCPU, &status);
 	exitOnFail(status, "create buffer volumen");
 	ImageOut = clCreateBuffer(context,  CL_MEM_WRITE_ONLY,  sizeof(double) * bandas * num_endmembers, NULL, &status);
 	exitOnFail(status, "create buffer ImageOut");
@@ -140,6 +140,7 @@ pos *sga_gpu(   double *imagen,
 	//printf("Global: %d, Local: %d\n",global,localSize);
 	t1d = get_time();
 
+
 	while(num_loop < num_endmembers){
 		status = clEnqueueNDRangeKernel(command_queue, kernel_endmember, 1, NULL, &global, &localSize, 0, NULL, &ev_endmember);
 		exitOnFail(status, "Launch OpenCL endmember kernel");
@@ -152,7 +153,6 @@ pos *sga_gpu(   double *imagen,
 		exitOnFail(status, "Profiling kernel endmember - end");
 		clReleaseEvent(ev_endmember);
 		k_endmember+=(end-start)*1.0e-9;
-
 
 		status = clEnqueueNDRangeKernel(command_queue, kernel_reduce, 1, NULL, &globalSize_reduction, &localSize, 0, NULL, &ev_reduce);
 		exitOnFail(status, "Launch OpenCL reduction kernel");

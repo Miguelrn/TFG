@@ -108,6 +108,9 @@ int main(int argc, char **argv) {
 			t0 = get_time();
 			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue);
 			t1 = get_time();
+			for(i = 0; i < endmember; i++){
+				printf("%2d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
+			}
 			break;
 
 		case 'd':/* SCLSU */
@@ -137,7 +140,8 @@ int main(int argc, char **argv) {
 
 		case 'e':/* GENE + SGA + SCLSU */
 			/*GENE*/
-			printf("\nojo hasta que no este gene completo se calculara %d endmembers!!\n\n",endmember);
+			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
 	
 			/*SGA*/
 			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)
@@ -156,6 +160,7 @@ int main(int argc, char **argv) {
 				magma_free_cpu(abundancias_h);
 			}
 			t1 = get_time();
+			magma_free_cpu(umatrix_h);
 
 			break;
 
