@@ -1,17 +1,18 @@
 #include "gene.h"
-
-//export PATH=/usr/local/cuda-7.5/bin:$PATH
-//export LD_LIBRARY_PATH=/usr/local/cuda-7.5/lib64:$LD_LIBRARY_PATH
-
-
-
+/*
+export PATH=/usr/local/cuda-7.5/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda-7.5/lib64:$LD_LIBRARY_PATH
+*/
 
 
-int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_command_queue command_queue, cl_context context, cl_device_id deviceID, double *umatrix_Host){
+
+
+int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P_FA, cl_device_id deviceID, double *umatrix_Host){
 
 
 	cl_program program;
 	cl_kernel kernel_mean_pixel;
+	cl_kernel kernel_true_image;
 	cl_kernel kernel_max_bright;
 	cl_kernel kernel_max_bright_reduce;
 	cl_kernel kernel_pixel_projections;
@@ -19,12 +20,11 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
     	cl_int status;
 	cl_ulong start = (cl_ulong) 0;
 	cl_ulong end = (cl_ulong) 0;
-	cl_event ev_mean_pixel;
-	cl_event ev_max_bright;
+
 
 	int lwork  = bands*bands, info;
 	double alpha = 1.0,beta = 0.0;
-	size_t size = 0;
+	size_t offset = 0;
 	real_Double_t t0,t1,t2,t3,t4,t5,t6,t7,t8,t9,t10,t11,t12;
 
 	int linessamples = lines*samples;
@@ -37,6 +37,7 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	double k_mean_pixel = 0.0, k_max_bright = 0.0;
 	size_t global_mean = 256;//ceil((double)samples*lines/256.0)*256.0;
 	size_t local_mean = 256;
+	size_t global_true_image = bands*bands;
 	size_t global_bright = linessamples;
 	size_t local_projections = 256;//por ejemplo...
 	size_t global_projections = ceil(linessamples/local_projections)*local_projections;
@@ -53,6 +54,24 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	FILE *fp;
 	long filelen;
 	long readlen;
+	
+
+	//CLMAGMA
+	magma_queue_t queue;
+	magma_int_t err;
+	magma_init();//falla ponerle esta funcion??
+	magma_print_environment();
+	
+	
+
+	err = magma_queue_create(deviceID, &queue);
+	if ( err != 0 ) {
+		fprintf( stderr, "magma_queue_create failed: %d\n", (int) err );
+		exit(-1);
+	}
+
+
+
 	char *kernel_src;  //char string to hold kernel source
 	
 	fp = fopen("gene_kernel.cl","r");
@@ -71,6 +90,12 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	// ensure the string is NULL terminated
 	kernel_src[filelen]='\0';//OJO//-----------------------------------------------------------------------------------------------+1
 
+
+        // get OpenCL context from MAGMA queue
+        // (probably MAGMA will provide a function to do this nicely in the future.)
+        cl_context context;
+        err = clGetCommandQueueInfo( queue, CL_QUEUE_CONTEXT, sizeof(cl_context), &context, NULL );
+        exitOnFail( err, "clGetCommandQueueInfo" );
 	 
 	// create program object from source. 
 	// kernel_src contains source read from file earlier
@@ -83,6 +108,9 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	kernel_mean_pixel = clCreateKernel(program, "mean_pixel", &status);
 	exitOnFail(status, "Unable to create kernel mean_pixel object.");
 
+	kernel_true_image = clCreateKernel(program, "true_image", &status);
+	exitOnFail(status, "Unable to create kernel true_image object.");
+
 	kernel_max_bright = clCreateKernel(program, "max_bright", &status);
 	exitOnFail(status, "Unable to create kernel max_bright object.");
 
@@ -93,27 +121,11 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	exitOnFail(status, "Unable to create kernel kernel_pixel_projection object.");
 
 
-
-	//CLMAGMA
-	magma_queue_t queue;
-	magma_int_t err;
-	magma_init();//falla ponerle esta funcion??
-	magma_print_environment();
-	
-	
-
-	err = magma_queue_create(deviceID, &queue);
-	if ( err != 0 ) {
-		fprintf( stderr, "magma_queue_create failed: %d\n", (int) err );
-		exit(-1);
-	}
-
-
 	//----CLMAGMA----//
 	t0 = magma_sync_wtime(queue);
 
 	//Device
-	magmaDouble_ptr image_Device, noise_Device, c_Device, cov_image_Device, cov_noise_Device, img_reduced_Device, ctcw_Device, rw_small_Device, work_Device;
+	magmaDouble_ptr image_Device, noise_Device, c_Device, cov_image_Device, cov_noise_Device, rx_true_Device, img_reduced_Device, ctcw_Device, rw_small_Device, work_Device;
 	magma_int_t ldwork, ldda;
 	ldwork = Nmax_1 * magma_get_dgetri_nb(Nmax_1);
 	ldda = ((Nmax_1+31)/32)*32;
@@ -122,15 +134,12 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	MALLOC_DEVICE(noise_Device, double, samples*lines*bands)
 	MALLOC_DEVICE(c_Device, double, bands*bands)
 	MALLOC_DEVICE(cov_image_Device, double, bands*bands)
+	MALLOC_DEVICE(rx_true_Device, double, bands*bands)
 	MALLOC_DEVICE(cov_noise_Device, double, bands*bands)
 	MALLOC_DEVICE(img_reduced_Device, double, Nmax*linessamples)
 	MALLOC_DEVICE(ctcw_Device, double, Nmax_1*bands)
 	MALLOC_DEVICE(rw_small_Device, double, ldda*Nmax_1)
 	MALLOC_DEVICE(work_Device, double, ldwork)
-
-
-
-
 
 
 	//Host
@@ -158,122 +167,39 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 
 
 
-//---------------------------------------------------------------------------------------------
-//                                     Pruebas
-/*	int row = 3, col = 3;
-	double *A_h, *B_h;
-	cl_mem A_k, B_k;
-	magma_malloc(&A_k, row*col*sizeof(double));
-	magma_malloc(&B_k, row*col*sizeof(double));
-	magma_malloc_cpu((void**) &A_h, row*col*sizeof(double));
-	magma_malloc_cpu((void**) &B_h, row*col*sizeof(double));
-	for(int z = 0; z < row*col; z++) A_h[z] = z+1;
-	for(int z = 0; z < row*col; z++) printf("%f ",A_h[z]); printf("\n");
 
-	magma_dsetmatrix(row, col, A_h, row, A_k, size, row, queue);
-	magma_dgemm(MagmaNoTrans, MagmaTrans, row, row, col, alpha, A_k, size, row, A_k, size, row, beta, B_k, size, row, queue);
-	magma_dgetmatrix(row,col, B_k, size, row, B_h, row, queue);
+	magma_dsetmatrix(samples*lines, bands, image, samples*lines, image_Device, offset, samples*lines, queue);
 
-	for(int z = 0; z < row*col; z++) printf("%f ",B_h[z]); printf("\n");//working 
-
-
-	cl_kernel k_prueba;
-	k_prueba = clCreateKernel(program, "prueba", &status);
-	
-	status = clSetKernelArg(k_prueba, 0, sizeof(cl_mem), &A_k);
-	exitOnFail(status, "Unable to set kernel prueba arguments.");//fail error -38
-
-	size_t global_prueba = row*col;
-	status = clEnqueueNDRangeKernel(command_queue, k_prueba, 1, NULL, &global_prueba, NULL, 0, NULL, NULL);
-	exitOnFail(status, "Launch OpenCL prueba kernel");
-
-	magma_dgetmatrix(row, col, A_k, size, row, A_h, row, queue);
-	for(int z = 0; z < row*col; z++) printf("%f ",A_h[z]); printf("\n");
-*/
-
-
-
-
-//---------------------------------------------------------------------------------------------
-
-	//kernel
-	cl_mem image_kernel = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double) * linessamples * bands, image, &status);
-	exitOnFail(status, "create buffer noise");
-
-
-	status = clSetKernelArg(kernel_mean_pixel, 0, sizeof(cl_mem), &image_kernel);
+	status = clSetKernelArg(kernel_mean_pixel, 0, sizeof(cl_mem), &image_Device);
 	status |= clSetKernelArg(kernel_mean_pixel, 1, sizeof(cl_int), &linessamples);
 	status |= clSetKernelArg(kernel_mean_pixel, 2, sizeof(cl_int), &bands);
     	status |= clSetKernelArg(kernel_mean_pixel, 3, sizeof(cl_double)*local_mean, NULL);//localsize
 	exitOnFail(status, "Unable to set kernel mean_pixel arguments.");
 
-
-	//---------------------------------------//
-
-
-	magma_dsetmatrix(samples*lines, bands, image, samples*lines, image_Device, size, samples*lines, queue);
 	t1 = magma_sync_wtime(queue);
 
 	//---------------------------------------//(noise reduction)
 
 	est_noise(image, image_Device, linessamples, bands, noise_Device, queue);
-	
-	//perogrullada llevarlo a host para luego traerlo a device de nuevo
-	magma_dgetmatrix(linessamples, bands, noise_Device, size, linessamples, noise_Host, linessamples, queue);//comprobar que es necesario(donde se usa noise host)
 
 	t2 = magma_sync_wtime(queue);
-
-
 
 	//---------------------------------------//(covarianza)
 
 	//(covarianza de la imagen)
-	status = clEnqueueNDRangeKernel(command_queue, kernel_mean_pixel, 1, NULL, &global_mean, &local_mean, 0, NULL, &ev_mean_pixel);//covarianza sobre imagen
+	status = clEnqueueNDRangeKernel(queue, kernel_mean_pixel, 1, NULL, &global_mean, &local_mean, 0, NULL, NULL);//covarianza sobre imagen
 	exitOnFail(status, "Launch OpenCL mean_pixel kernel");
-	start = (cl_ulong) 0;
-	end = (cl_ulong) 0;
-	clWaitForEvents(1,&ev_mean_pixel);
-	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel mean_pixel - start");
-	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel mean_pixel - end");
-	clReleaseEvent(ev_mean_pixel);
-	k_mean_pixel+=(end-start)*1.0e-9;
 
 
-//--llevarlo a host para traerlo a device
-	status = clEnqueueReadBuffer(command_queue, image_kernel, CL_TRUE, 0, sizeof(double) * linessamples * bands, image_Host, 0, NULL, NULL);//cozarianza de noise
-	exitOnFail(status, "Error enqueuing read buffer command.");//medir tiempo tambien??
+	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, offset, linessamples, image_Device, offset, linessamples, beta, cov_image_Device, offset, bands, queue);
 
-	magma_dsetmatrix(linessamples, bands, image_Host, linessamples, image_Device, size, linessamples, queue);
-	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, size, linessamples, image_Device, size, linessamples, beta, cov_image_Device, size, bands, queue);
-//---
-
-	//(covarianza de noise) (pasamos por host para traer un array que ya estaba en device...)
-	cl_mem noise_kernel = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double) * linessamples * bands, noise_Host, &status);
-	exitOnFail(status, "create buffer noise");
-	status = clSetKernelArg(kernel_mean_pixel, 0, sizeof(cl_mem), &noise_kernel);//con esto funciona pero es traerlo desde Host...
-	
-
-	status |= clEnqueueNDRangeKernel(command_queue, kernel_mean_pixel, 1, NULL, &global_mean, &local_mean, 0, NULL, &ev_mean_pixel);//covarianza sobre imagen
+	//covarianza del ruido
+	status = clSetKernelArg(kernel_mean_pixel, 0, sizeof(cl_mem), &noise_Device);
+	status |= clEnqueueNDRangeKernel(queue, kernel_mean_pixel, 1, NULL, &global_mean, &local_mean, 0, NULL, NULL);//covarianza sobre imagen
 	exitOnFail(status, "Launch OpenCL mean_pixel kernel 2");
-	start = (cl_ulong) 0;
-	end = (cl_ulong) 0;
-	clWaitForEvents(1,&ev_mean_pixel);
-	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel mean_pixel - start");
-	status = clGetEventProfilingInfo(ev_mean_pixel, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel mean_pixel - end");
-	clReleaseEvent(ev_mean_pixel);
-	k_mean_pixel+=(end-start)*1.0e-9;
 
-//--llevarlo a host para traerlo a device
-	status = clEnqueueReadBuffer(command_queue, noise_kernel, CL_TRUE, 0, sizeof(double) * linessamples * bands, noise_Host, 0, NULL, NULL);//cozarianza de img
-	exitOnFail(status, "Error enqueuing read buffer command.");//medir tiempo tambien??
 
-	magma_dsetmatrix(linessamples, bands, noise_Host, linessamples, noise_Device, size, linessamples, queue);
-	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, noise_Device, size, linessamples, noise_Device, size, linessamples, beta, cov_noise_Device, size, bands, queue);
-//---
+	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, noise_Device, offset, linessamples, noise_Device, offset, linessamples, beta, cov_noise_Device, offset, bands, queue);
 
 
 
@@ -286,34 +212,37 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	//gettimeofday(&t4,NULL);
 	/********************************************************************************************************************************************/
 
-	magma_dgetmatrix(bands, bands, cov_image_Device, size, bands, cov_image_Host, bands, queue);
-	magma_dgetmatrix(bands, bands, cov_noise_Device, size, bands, cov_noise_Host, bands, queue);
 
-	// Calculamos Rx_true quitando a la covarianza de la imagen la covarianza del ruido.
-	for (i = 0; i < ( bands*bands); i++){
-		rx_true_Host[i] = cov_image_Host[i] - cov_noise_Host[i];//---------------------------------------------------meter en un kernel, ya estaba en device
-		cov_noise_Host[i] /= linessamples;
-	}
-	magma_dsetmatrix(bands, bands, cov_noise_Host, bands, cov_noise_Device, size, bands, queue);
+	status = clSetKernelArg(kernel_true_image, 0, sizeof(cl_mem), &cov_image_Device);
+	status |= clSetKernelArg(kernel_true_image, 1, sizeof(cl_mem), &cov_noise_Device);
+	status |= clSetKernelArg(kernel_true_image, 2, sizeof(cl_int), &linessamples);
+    	status |= clSetKernelArg(kernel_true_image, 3, sizeof(cl_int), &bands);
+    	status |= clSetKernelArg(kernel_true_image, 4, sizeof(cl_mem), &rx_true_Device);
+	exitOnFail(status, "Unable to set kernel true_image arguments.");
+
+	status |= clEnqueueNDRangeKernel(queue, kernel_true_image, 1, NULL, &global_true_image, NULL, 0, NULL, NULL);//covarianza sobre imagen
+	exitOnFail(status, "Launch OpenCL true_image kernel");
+	
+	magma_dgetmatrix(bands, bands, rx_true_Device, offset, bands, rx_true_Host, bands, queue);
 	
 
 	magma_dgesvd(MagmaNoVec, MagmaAllVec, bands, bands, rx_true_Host, bands, s_Host, v_Host, bands, c_Host, bands, work_Host, lwork, queue, &info);
-	magma_dsetmatrix(bands, bands, c_Host, bands, c_Device, size, bands, queue);
+	magma_dsetmatrix(bands, bands, c_Host, bands, c_Device, offset, bands, queue);
 
 
-	magma_dgemm(MagmaNoTrans, MagmaTrans, linessamples, Nmax_1, bands, alpha, image_Device, size, linessamples, c_Device, size, bands, beta, img_reduced_Device, size, linessamples, queue);
-	magma_dgetmatrix(Nmax, linessamples, img_reduced_Device, size, Nmax, img_reduced_Host, Nmax, queue);//ya lo tengo en device...
+	magma_dgemm(MagmaNoTrans, MagmaTrans, linessamples, Nmax_1, bands, alpha, image_Device, offset, linessamples, c_Device, offset, bands, beta, img_reduced_Device, offset, linessamples, queue);
+	magma_dgetmatrix(Nmax, linessamples, img_reduced_Device, offset, Nmax, img_reduced_Host, Nmax, queue);
 
 
 	//C'*Cw 
-	magma_dgemm(MagmaNoTrans, MagmaNoTrans, Nmax_1, bands, bands, alpha, c_Device, size, bands, cov_noise_Device, size, bands, beta, ctcw_Device, size, Nmax_1, queue);
+	magma_dgemm(MagmaNoTrans, MagmaNoTrans, Nmax_1, bands, bands, alpha, c_Device, offset, bands, cov_noise_Device, offset, bands, beta, ctcw_Device, offset, Nmax_1, queue);
 
 	//C'*Cw*C 
-	magma_dgemm(MagmaNoTrans, MagmaTrans, Nmax_1, Nmax_1, bands, alpha, ctcw_Device, size, Nmax_1, c_Device, size, bands, beta, rw_small_Device, size, Nmax_1, queue);
+	magma_dgemm(MagmaNoTrans, MagmaTrans, Nmax_1, Nmax_1, bands, alpha, ctcw_Device, offset, Nmax_1, c_Device, offset, bands, beta, rw_small_Device, offset, Nmax_1, queue);
 
 
 
-	magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, Nmax_1, rw_small_Host, Nmax_1, queue);
+	magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, offset, Nmax_1, rw_small_Host, Nmax_1, queue);
 
 
 	dgetrf_(&Nmax_1, &Nmax_1, rw_small_Host, &Nmax_1, ipiv, &info);
@@ -321,15 +250,10 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 
 
 
-	//magma_dgetrf_gpu(Nmax_1, Nmax_1, rw_small_Device, size, ldda, ipiv_Host, queue, &info);
-	//magma_dgetri_gpu(Nmax_1, rw_small_Device, size, ldda, ipiv_Host, work_Device, size, ldwork, &queue, &info);//no funciona correctamente
+	//magma_dgetrf_gpu(Nmax_1, Nmax_1, rw_small_Device, offset, ldda, ipiv_Host, queue, &info);
+	//magma_dgetri_gpu(Nmax_1, rw_small_Device, offset, ldda, ipiv_Host, work_Device, offset, ldwork, &queue, &info);//no funciona correctamente
 
-	//magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, size, ldda, rw_small_Host, Nmax_1, queue);//lo usa np_test
-
-
-
-
-
+	//magma_dgetmatrix(Nmax_1, Nmax_1, rw_small_Device, offset, ldda, rw_small_Host, Nmax_1, queue);//lo usa np_test
 	
 
 	t4 = magma_sync_wtime(queue);
@@ -338,9 +262,6 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	// ahora empieza el ATGP.
 
 	// The brightest pixel is calculated
-	//ya lo tengo en device como img_reduced_Device.... pero no puedo usarlo z.z
-	cl_mem img_reduced_kernel = clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, sizeof(double)*linessamples*Nmax, img_reduced_Host, &status);
-	exitOnFail(status, "create buffer img_reduced");
 	cl_mem img_max_bright = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(double)*linessamples, NULL, &status);
 	exitOnFail(status, "create buffer img_max_bright");
 	cl_mem img_projections = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(double)*totalProjections, NULL, &status);
@@ -351,7 +272,7 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 	exitOnFail(status, "create buffer proymatrix_kernel");
 	
 
-	status = clSetKernelArg(kernel_max_bright, 0, sizeof(cl_mem), &img_reduced_kernel);
+	status = clSetKernelArg(kernel_max_bright, 0, sizeof(cl_mem), &img_reduced_Device);
 	status |= clSetKernelArg(kernel_max_bright, 1, sizeof(cl_int), &linessamples);
 	status |= clSetKernelArg(kernel_max_bright, 2, sizeof(cl_int), &Nmax);
     	status |= clSetKernelArg(kernel_max_bright, 3, sizeof(cl_mem), &img_max_bright);
@@ -363,41 +284,24 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
     	status |= clSetKernelArg(kernel_max_bright_reduce, 3, sizeof(cl_mem), &img_projections);
 	exitOnFail(status, "Unable to set kernel max_bright arguments.");
 
-	status = clSetKernelArg(kernel_pixel_projections, 0, sizeof(cl_mem), &img_reduced_kernel);
+	status = clSetKernelArg(kernel_pixel_projections, 0, sizeof(cl_mem), &img_reduced_Device);
 	status = clSetKernelArg(kernel_pixel_projections, 1, sizeof(cl_mem), &proymatrix_kernel);
 	status |= clSetKernelArg(kernel_pixel_projections, 2, sizeof(cl_int), &linessamples);
 	status |= clSetKernelArg(kernel_pixel_projections, 3, sizeof(cl_int), &Nmax);
     	status |= clSetKernelArg(kernel_pixel_projections, 4, sizeof(cl_mem), &img_max_bright);
 	exitOnFail(status, "Unable to set kernel pixel projections arguments.");
 
-	status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright, 1, NULL, &global_bright, NULL, 0, NULL, &ev_max_bright);//max_bright
+
+	status = clEnqueueNDRangeKernel(queue, kernel_max_bright, 1, NULL, &global_bright, NULL, 0, NULL, NULL);//max_bright
 	exitOnFail(status, "Launch OpenCL max_bright kernel");
-	start = (cl_ulong) 0;
-	end = (cl_ulong) 0;
-	clWaitForEvents(1,&ev_max_bright);
-	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel max_bright - start");
-	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel max_bright - end");
-	clReleaseEvent(ev_max_bright);
-	k_max_bright+=(end-start)*1.0e-9;
 
 
-	status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, &ev_max_bright);
+	status = clEnqueueNDRangeKernel(queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, NULL);
 	exitOnFail(status, "Launch OpenCL max_bright_reduction kernel");
-	start = (cl_ulong) 0;
-	end = (cl_ulong) 0;
-	clWaitForEvents(1,&ev_max_bright);
-	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-	exitOnFail(status, "Profiling kernel max_bright_reduction - start");
-	status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-	exitOnFail(status, "Profiling kernel max_bright_reduction - end");
-	clReleaseEvent(ev_max_bright);
-	k_max_bright+=(end-start)*1.0e-9;
 
 
-	clEnqueueReadBuffer(command_queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
-	clEnqueueReadBuffer(command_queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
+	clEnqueueReadBuffer(queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
+	clEnqueueReadBuffer(queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
 	
 	
 	for(i = 0; i < totalProjections; i++){
@@ -436,35 +340,19 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 		SustractIdentity(proymatrix_Host, Nmax);
 
 		//envio del proymatrix lanzamiento de los dos kernel y lectura y reduccion final
-		status = clEnqueueWriteBuffer(command_queue, proymatrix_kernel, CL_TRUE, 0, sizeof(double) * Nmax * Nmax , proymatrix_Host, 0, NULL, NULL);
+		status = clEnqueueWriteBuffer(queue, proymatrix_kernel, CL_TRUE, 0, sizeof(double) * Nmax * Nmax , proymatrix_Host, 0, NULL, NULL);
 		exitOnFail(status, "Write proymatrix buffer");
 
-		status = clEnqueueNDRangeKernel(command_queue, kernel_pixel_projections, 1, NULL, &global_bright, NULL, 0, NULL, &ev_max_bright);//max_bright
+		status = clEnqueueNDRangeKernel(queue, kernel_pixel_projections, 1, NULL, &global_bright, NULL, 0, NULL, NULL);//max_bright
 		exitOnFail(status, "Launch OpenCL pixel_projections kernel");
-		start = (cl_ulong) 0;
-		end = (cl_ulong) 0;
-		clWaitForEvents(1,&ev_max_bright);
-		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-		exitOnFail(status, "Profiling kernel max_bright - start");
-		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-		exitOnFail(status, "Profiling kernel max_bright - end");
-		clReleaseEvent(ev_max_bright);
-		k_max_bright+=(end-start)*1.0e-9;
 
-		status = clEnqueueNDRangeKernel(command_queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, &ev_max_bright);
+
+		status = clEnqueueNDRangeKernel(queue, kernel_max_bright_reduce, 1, NULL, &global_projections, &local_projections, 0, NULL, NULL);
 		exitOnFail(status, "Launch OpenCL max_bright_reduction kernel");
-		start = (cl_ulong) 0;
-		end = (cl_ulong) 0;
-		clWaitForEvents(1,&ev_max_bright);
-		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &start, NULL);
-		exitOnFail(status, "Profiling kernel max_bright_reduction - start");
-		status = clGetEventProfilingInfo(ev_max_bright, CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &end, NULL);
-		exitOnFail(status, "Profiling kernel max_bright_reduction - end");
-		clReleaseEvent(ev_max_bright);
-		k_max_bright+=(end-start)*1.0e-9;
 
-		clEnqueueReadBuffer(command_queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
-		clEnqueueReadBuffer(command_queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
+
+		clEnqueueReadBuffer(queue, indice_projections, CL_TRUE, 0, sizeof(int) * totalProjections, indice, 0, NULL, NULL);
+		clEnqueueReadBuffer(queue, img_projections, CL_TRUE, 0, sizeof(double) * totalProjections, projections, 0, NULL, NULL);
 	
 		max_bright = 0.0;
 		for(j = 0; j < totalProjections; j++){
@@ -524,7 +412,7 @@ int gene_magma(double *image, int samples, int lines, int bands, int Nmax, int P
 
 
 	//hacer los free MAGMA
-	clFinish(command_queue);
+	//clFinish(command_queue);
 	magma_finalize();
 
 	clReleaseProgram(program);
@@ -574,7 +462,7 @@ int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int
 	int lwork = bands*bands;
 	int i = 0, j = 0, b = 0;
 	int uno = 1;
-	size_t size = 0;
+	size_t offset = 0;
 
 	//Device
 	magmaDouble_ptr rr_Device, beta_Device;
@@ -594,9 +482,9 @@ int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int
 
 
 
-	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, size, linessamples, image_Device, size, linessamples, beta,  rr_Device, size, bands, queue);
+	magma_dgemm(MagmaTrans, MagmaNoTrans, bands, bands, linessamples, alpha, image_Device, offset, linessamples, image_Device, offset, linessamples, beta,  rr_Device, offset, bands, queue);
 
-	magma_dgetmatrix(bands, bands, rr_Device, size, bands, rr_Host, bands, queue);
+	magma_dgetmatrix(bands, bands, rr_Device, offset, bands, rr_Host, bands, queue);
 
 
 
@@ -636,11 +524,11 @@ int est_noise(double *image, magmaDouble_ptr image_Device, int linessamples, int
 	alpha = -1;
 	beta = 1;
 
-	magma_dsetmatrix(bands, bands, beta_Host, bands, beta_Device, size, bands, queue);
+	magma_dsetmatrix(bands, bands, beta_Host, bands, beta_Device, offset, bands, queue);
 	//memcpy(noise_Device, image_Device, linessamples*bands*sizeof(double));//VV
-	magma_dsetmatrix(linessamples, bands, image, linessamples, noise_Device, size, linessamples, queue);
+	magma_dsetmatrix(linessamples, bands, image, linessamples, noise_Device, offset, linessamples, queue);
 
-	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, bands, bands, alpha, image_Device, size, linessamples, beta_Device, size, bands, beta, noise_Device, size, linessamples, queue);
+	magma_dgemm(MagmaNoTrans, MagmaNoTrans, linessamples, bands, bands, alpha, image_Device, offset, linessamples, beta_Device, offset, bands, beta, noise_Device, offset, linessamples, queue);
 
 
 

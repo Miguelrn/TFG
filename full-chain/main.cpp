@@ -86,13 +86,13 @@ int main(int argc, char **argv) {
 	switch(argv[7][0]){
 		case 'a':/* GENE */
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
+			gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
 			magma_free_cpu(umatrix_h);
 			break;
 
 		case 'b':/* GENE + SCLSU */
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
 
 			MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
 			lsu_gpu_m(imagen_h, umatrix_h, deviceID, maxEndmembers, endmember, lines, samples, argv[1], abundancias_h);
@@ -141,7 +141,7 @@ int main(int argc, char **argv) {
 		case 'e':/* GENE + SGA + SCLSU */
 			/*GENE*/
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, command_queue, context, deviceID, umatrix_h);
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
 	
 			/*SGA*/
 			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)

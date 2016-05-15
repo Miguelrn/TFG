@@ -1,5 +1,17 @@
 #define BLK 512
 
+__kernel void true_image(__global double *imageIn,
+			 __global double *noiseIn,
+			 const int linessamples,
+			 const int bands,
+			 __global double *imageOut){
+	
+	const int gidx = get_global_id(0);
+	imageOut[gidx] = imageIn[gidx] - noiseIn[gidx];
+	noiseIn[gidx] /= linessamples;
+
+}
+
 __kernel void pixel_projections(__global double *imageIn,
 				__global double *proymatrix,
 				const int linessamples,
@@ -132,10 +144,6 @@ __kernel void mean_pixel(__global double *imageInOut,
 }
 
 
-__kernel void prueba(__global double *A){
-	const int gidx = get_global_id(0);
-	
-	A[gidx] = 2*A[gidx];
-}
+
 
 
