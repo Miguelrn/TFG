@@ -3,7 +3,15 @@
 
 
 
-void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename){
+void lsu_gpu_v(	double *imagen,
+		double *endmembers,
+		int DeviceSelected,
+		int bandas,
+		int targets,
+		int lines,
+		int samples,
+		char *filename,
+		tiempo* sclsu){
 
 	int i, j, one = 1;
 	int sampleLines = lines * samples;	
@@ -23,7 +31,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	}
 
 
-	std::cout << viennacl::ocl::current_device().info() << std::endl;
+	//std::cout << viennacl::ocl::current_device().info() << std::endl;
 
   	viennacl::tools::timer timer;
   	timer.start();
@@ -117,7 +125,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	viennacl::copy(endmember_vector, endmember_Device);
 	t1 = timer.get();
 	tTransfer += t1-t0;
-	printf("Tiempo transfer Host->Device(imagen): %f \n", t1-t0);
+	//printf("Tiempo transfer Host->Device(imagen): %f \n", t1-t0);
 
 
 
@@ -126,7 +134,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	MtM_Device = viennacl::linalg::prod(viennacl::trans(endmember_Device), endmember_Device);
 	t1 = timer.get();
 	tExeGPU += t1-t0;
-	//printf("Tiempo dgemm(MtM): %f \n", t1-t0);
 
 /* produce resultados incorrectos...
 	t0 = timer.get();
@@ -150,10 +157,10 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 
 
 	t0 = timer.get();
-	UFdiag(UF, SF, IFS, targets, 1e-8);//se puede paralelizar pero es muy pequeño => tarda mas en gpu
+	UFdiag(UF, SF, IFS, targets, 1e-8);
 	t1 = timer.get();
 	tExeCPU += t1-t0;
-	//printf("Tiempo UFdiag: %f \n", t1-t0);
+
 
 	t0 = timer.get();
 	for(i = 0; i < targets; i++) for(j = 0; j < targets; j++){ UF_vector[i][j] = UF[i+j*targets]; IFS_vector[i][j] = IFS[i+j*targets];}
@@ -161,15 +168,12 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	viennacl::copy(IFS_vector, IFS_Device);
 	t1 = timer.get();
 	tTransfer += t1-t0;
-	//printf("Tiempo transfer(UF e IFS): %f \n", t1-t0);
 
 	
 	t0 = timer.get();
 	IF_Device = viennacl::linalg::prod(IFS_Device, viennacl::trans(UF_Device));
 	t1 = timer.get();
 	tExeGPU += t1-t0;
-	//printf("Tiempo dgemm(IF): %f \n", t1-t0);	
-
 
 
 	t0 = timer.get();
@@ -182,15 +186,12 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	IF1_Aux(IF, IF1, Aux, targets);
 	t1 = timer.get();
 	tExeCPU += t1-t0;
-	//printf("Tiempo IF1_Aux: %f \n", t1-t0);
 
 	
 	t0 = timer.get();
 	yy_Device = viennacl::linalg::prod(imagen_Device, endmember_Device);
 	t1 = timer.get();
 	tExeGPU += t1-t0;
-	//printf("Tiempo dgemm(yy): %f \n", t1-t0);
-
 
 
 	t0 = timer.get();
@@ -203,7 +204,6 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	abundancias_Device = viennacl::linalg::prod(yy_Device, IF1_Device);
 	t1 = timer.get();
 	tExeGPU += t1-t0;
-	//printf("Tiempo dgemm(abundancias): %f \n", t1-t0);
 
 
 	t0 = timer.get();
@@ -211,7 +211,7 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	for(i = 0; i < sampleLines; i++) for(j = 0; j < targets; j++) abundancias[i+j*sampleLines] = abundancias_vector[i][j];
 	t1 = timer.get();
 	tTransfer += t1-t0;	
-	//for(i = 0; i < targets; i++)  printf("%f ", abundancias_vector[i][0]); printf("\n%f\n",abundancias_vector[sampleLines-1][targets-1]);//<- borrar
+
 
 	t0 = timer.get();
 	for (j = 0; j < targets; j++){
@@ -222,19 +222,23 @@ void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int banda
 	}
 	t1 = timer.get();
 	tExeCPU += t1-t0;
-	//printf("Tiempo (abundancias + auk): %f \n", t1-t0);	
 
 
 	viennacl::backend::finish();
 
 
+	sclsu->init += t1Init-t0Init;
+	sclsu->transfer += tTransfer;
+	sclsu->cpu += tExeCPU;
+	sclsu->gpu += tExeGPU;
+/*
 	printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
 	double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
 	double tExe =  tTransfer + tExeCPU + tExeGPU;
 	printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
 	printf("\nTotal:	\t\t%.3f (seconds)\n\n",tTotal);
 
-
+*/
 
 
 
@@ -287,7 +291,8 @@ void lsu_gpu_m(	double *image_Host,
 		int lines, 
 		int samples, 
 		char *filename,
-		double *abundancias_h){
+		double *abundancias_h,
+		tiempo *sclsu){
 
 	size_t size = 0;
 	double norm_y;
@@ -300,7 +305,7 @@ void lsu_gpu_m(	double *image_Host,
 	int linessamples = lines*samples;
 
 	double tTransfer = 0.0, tExeGPU = 0.0, tExeCPU = 0.0;
-	double t0Init = get_time();
+	
 	
 
 	if(filename != NULL){
@@ -308,6 +313,7 @@ void lsu_gpu_m(	double *image_Host,
 		printf("                            ClMagma\n");
 		printf("-----------------------------------------------------------------------\n");
 	}
+	
 	//CLMAGMA
 	magma_queue_t queue;
 	magma_int_t err;
@@ -315,7 +321,8 @@ void lsu_gpu_m(	double *image_Host,
 		magma_init();//falla ponerle esta funcion??
 		magma_print_environment();
 	}
-		
+
+	double t0Init = get_time();
 	
 	err = magma_queue_create( deviceID, &queue );
 	if ( err != 0 ) {
@@ -354,7 +361,6 @@ void lsu_gpu_m(	double *image_Host,
 	MALLOC_HOST(IF_h, double, targets*targets)
 	MALLOC_HOST(IF1_h, double, targets*targets)
 	MALLOC_HOST(Aux_h, double, targets)
-	//MALLOC_HOST(abundancias_h, double, targets*linessamples)
 
 	double t1Init = get_time();
 
@@ -453,18 +459,21 @@ void lsu_gpu_m(	double *image_Host,
 	tExeCPU += magma_sync_wtime(queue) - dev_time;
 
 	
-
+	sclsu->init += t1Init-t0Init;
+	sclsu->transfer += tTransfer;
+	sclsu->cpu += tExeCPU;
+	sclsu->gpu += tExeGPU; 
 
 	if(filename != NULL){
 
 		magma_finalize();
-
+/*
 		printf("\nTotal INIT:	\t%.3f (seconds)\n", t1Init-t0Init);
 		double tTotal = (t1Init-t0Init)	+ tTransfer + tExeCPU + tExeGPU;
 		double tExe =  tTransfer + tExeCPU + tExeGPU;
 		printf("\nTotal LSU:	\t%.3f (seconds)\n Transfer:    \t\t%.3f\t(%2.1f%) \n Execution(CPU): \t%.3f\t(%2.1f%)\n Execution(GPU): \t%2.3f\t(%.1f%)\n", tExe, tTransfer, (tTransfer*100)/tExe, tExeCPU, (tExeCPU*100)/tExe, tExeGPU, (tExeGPU*100)/tExe);
 		printf("\nTotal:	\t%.3f (seconds)\n\n",tTotal);
-
+*/
 	
 		char results_filename[MAXCAD];
 		strcpy(results_filename, filename);

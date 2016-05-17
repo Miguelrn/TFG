@@ -13,7 +13,8 @@ pos *sga_gpu(   double *imagen,
 		double *endmember_bandas, 
 		size_t localSize,
 		cl_context context,
-		cl_command_queue command_queue){
+		cl_command_queue command_queue,
+		tiempo *sga){
 
 
 	pos *solucion = (pos*) malloc((num_endmembers)*sizeof(pos));
@@ -44,7 +45,7 @@ pos *sga_gpu(   double *imagen,
 	size_t globalSize_extraccion = bandas;
 	double *volumenCPU = (double*) calloc (muestras * lineas, sizeof(double));
 
-	double t0d, t1d, t1fin, t_ram, t_device;
+	double t0d, t1d, t_ram;
 	double k_endmember = 0.0, k_reduce = 0.0, k_extrae = 0.0, read = 0.0, write = 0.0, tTotal = 0.0, tRamDevice=0.0;
 	
 	FILE *fp;
@@ -98,8 +99,7 @@ pos *sga_gpu(   double *imagen,
 	exitOnFail(status, "create buffer d_image");
 	posiciones = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,  sizeof(int) * num_endmembers * 2, solu, &status);
 	exitOnFail(status, "create buffer posiciones");
-	t_device = get_time();
-	//printf("\nTotal RAM->DEVICE:	\t%.5f (seconds)\n", t_device-t_ram);		
+	t_ram = get_time()-t_ram;		
 
 	volumen = clCreateBuffer(context,  CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,  sizeof(double) * muestras * lineas, volumenCPU, &status);
 	exitOnFail(status, "create buffer volumen");
@@ -137,8 +137,8 @@ pos *sga_gpu(   double *imagen,
  	status |= clSetKernelArg(kernel_extrae, 8, sizeof(cl_uint), &num_endmembers);
 	exitOnFail(status, "Unable to set kernel extrae arguments.");
 
-	//printf("Global: %d, Local: %d\n",global,localSize);
 	t1d = get_time();
+
 
 
 	while(num_loop < num_endmembers){
@@ -191,7 +191,7 @@ pos *sga_gpu(   double *imagen,
 			clSetKernelArg(kernel_extrae, 3, sizeof(cl_uint), &num_loop);
 		}
 	}
-	t1fin = get_time();
+	
 
 	// wait for the command to finish
 	clFinish(command_queue);
@@ -221,13 +221,18 @@ pos *sga_gpu(   double *imagen,
 	clReleaseEvent(ev_memcpy);
 	read+=(end-start)*1.0e-9;
 
-	tRamDevice = (t_device-t_ram);
+	sga->init += t1d-t0d-t_ram;
+	sga->gpu += k_endmember + k_reduce + k_extrae;
+	sga->transfer += read + write + t_ram;
+
+/*
+	tRamDevice = t_ram;
 	printf("\nTotal INIT:	\t%.3f (seconds)\n", (t1d-t0d)-(tRamDevice));	
 	tTotal = tRamDevice + k_endmember + k_reduce + k_extrae + read + write;
 	printf("\nTotal SGA:	\t%.3f (seconds)\n RAM->Device: \t%.3f\t(%.1f%) \n endmember: \t%.3f\t(%.1f%) \n reduce: \t%.3f\t(%.1f%)\n", tTotal, tRamDevice, (tRamDevice*100)/tTotal, k_endmember, (k_endmember*100)/tTotal, k_reduce, (k_reduce*100)/tTotal);
 	printf(" extract: \t%.3f\t(%.1f%)\n write: \t%.3f\t(%.1f%)\n read: \t\t%.3f\t(%.1f%)\n", k_extrae, (k_extrae*100)/tTotal, write, (write*100)/tTotal, read, (read/100)/tTotal);
 	printf("\nTotal TIME:	\t%.3f (seconds)\n\n", (t1d-t0d) -(tRamDevice) + tTotal);
-	
+*/	
 	for(i = 0;i < num_endmembers; i++){
 		solucion[i].filas = solu[i*2]; 
 		solucion[i].columnas = solu[i*2+1];

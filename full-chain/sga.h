@@ -18,7 +18,7 @@ typedef struct{
 	int columnas;
 }pos;
 
-pos *sga_gpu(double *imagen, int num_endmembers, int muestras, int lineas, int bandas, double *endmember_bandas, size_t localSize, cl_context context, cl_command_queue command_queue);
+pos *sga_gpu(double *imagen, int num_endmembers, int muestras, int lineas, int bandas, double *endmember_bandas, size_t localSize, cl_context context, cl_command_queue command_queue, tiempo *sga);
 
 
 #endif 

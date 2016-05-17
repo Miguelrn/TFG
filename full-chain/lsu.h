@@ -8,6 +8,7 @@
 #include <time.h>
 #include <string.h>
 #include "ReadWrite.h"
+#include "init_platform.h"
 
 
 //Vienna Opencl Libraries
@@ -50,13 +51,13 @@ if ( MAGMA_SUCCESS !=                                                  \
     exit(-1);                                                          \
 }
 
-//lsu whit ViennaCl
-void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename);
+//lsu with ViennaCl
+void lsu_gpu_v(double *imagen, double *endmembers, int DeviceSelected, int bandas, int targets, int lines, int samples, char *filename, tiempo *sclsu);
 
 
 
-//lsu whit Clmagma
-void lsu_gpu_m( double *imagen, double *endmember, cl_device_id deviceID, int bandas, int targets, int lines, int samples, char *filename, double *abundancias_h);
+//lsu with Clmagma
+void lsu_gpu_m(double *imagen, double *endmember, cl_device_id deviceID, int bandas, int targets, int lines, int samples, char *filename, double *abundancias_h, tiempo *sclsu);
 void IF1_Aux(double* IF,double* IF1, double* Aux,int targets);
 void UFdiag(double* UF,double* SF,double* IF,int targets,double mu);
 void divide_norm(double *X, double* M, double norm, int lines_samples, int bands, int p);

@@ -15,6 +15,8 @@
 
 #define MAXCAD 100
 
+
+
 int main(int argc, char **argv) {
 
 
@@ -31,12 +33,16 @@ int main(int argc, char **argv) {
 	double *abundancias_h;
 
 	int lines, samples, bands, datatype, i,j;
-	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;//se podria comprobar que lines y linesEnd son iguales... etc
+	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;
 
 	int endmember = 19, error, deviceSelected, librarySelected = 0, maxEndmembers;
 	float probFail;
 	size_t localSize;
 	pos *solucion;
+
+
+	tiempo total = {0,0,0,0}, sga = {0,0,0,0}, sclsu = {0,0,0,0}, gene = {0,0,0,0};
+	
 
 	cl_context context;
 	cl_command_queue command_queue;
@@ -63,39 +69,36 @@ int main(int argc, char **argv) {
 	printf("                    Imagen: %s\n",argv[1]);
 	printf("-----------------------------------------------------------------------\n");
 	/*Load Imagen*/
-	t0 = get_time();
+
 	strcpy(imagenhdr,argv[1]);
 	strcat(imagenhdr, ".hdr");
 	readHeader(imagenhdr, &samples, &lines, &bands, &datatype);
-    	printf("Lines = %d  Samples = %d  Nbands = %d  Data_type = %d\n", lines, samples, bands, datatype);
+
 	MALLOC_HOST(imagen_h, double, samples*lines*bands)
 
 
 	strcpy(imagenbsq, argv[1]);
 	strcat(imagenbsq, ".bsq");
 	Load_Image(imagenbsq, imagen_h, samples, lines, bands, datatype);
-	t1 = get_time();
-	printf("Tiempo de lectura de la Imagen: %f\n",t1-t0);
 
 	t0 = get_time();
 	init_OpenCl(&context, &command_queue, deviceSelected, &deviceID);
-	//init magma
-	//init Viennacl ?
-	t1 = get_time();
+	total.init += get_time()-t0;
+
 
 	switch(argv[7][0]){
 		case 'a':/* GENE */
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
+			gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h, &gene);
 			magma_free_cpu(umatrix_h);
 			break;
 
 		case 'b':/* GENE + SCLSU */
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h, &gene);
 
 			MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
-			lsu_gpu_m(imagen_h, umatrix_h, deviceID, maxEndmembers, endmember, lines, samples, argv[1], abundancias_h);
+			lsu_gpu_m(imagen_h, umatrix_h, deviceID, maxEndmembers, endmember, lines, samples, argv[1], abundancias_h, &sclsu);
 			magma_free_cpu(abundancias_h);
 			magma_free_cpu(umatrix_h);
 			break;
@@ -106,11 +109,10 @@ int main(int argc, char **argv) {
 			fflush(stdin);
 			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue);
+			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue, &sga);
 			t1 = get_time();
-			for(i = 0; i < endmember; i++){
-				printf("%2d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
-			}
+			//for(i = 0; i < endmember; i++) printf("%2d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
+			
 			break;
 
 		case 'd':/* SCLSU */
@@ -121,7 +123,7 @@ int main(int argc, char **argv) {
 			strcat(imagenhdr, ".hdr");
 			readHeader(imagenhdr, &samplesEnd, &linesEnd, &bandsEnd, &datatypeEnd);
 			MALLOC_HOST(endmember_bandas_h, double, linesEnd*bandsEnd)
-			//printf("Lines = %d  Samples = %d  Nbands = %d  Data_type = %d\n", linesEnd, samplesEnd, bandsEnd, datatypeEnd);
+
 
 			strcpy(imagenbsq, endmember_file);
 			strcat(imagenbsq, ".bsq");
@@ -129,10 +131,10 @@ int main(int argc, char **argv) {
 
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
-				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1], &sclsu);
 			else if(librarySelected == 2){//ClMagma
 				MALLOC_HOST(abundancias_h, double, linesEnd*lines*samples)
-				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h, &sclsu);
 				magma_free_cpu(abundancias_h);
 			}
 			t1 = get_time();
@@ -141,22 +143,22 @@ int main(int argc, char **argv) {
 		case 'e':/* GENE + SGA + SCLSU */
 			/*GENE*/
 			MALLOC_HOST(umatrix_h, double, maxEndmembers*maxEndmembers)
-			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h);
+			endmember = gene_magma(imagen_h, samples, lines, bands, maxEndmembers, probFail, deviceID, umatrix_h, &gene);
 	
 			/*SGA*/
 			MALLOC_HOST(endmember_bandas_h, double, bands*endmember)
 			t0 = get_time();
-			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue);
+			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue, &sga);
 			t1 = get_time();
 
 
 			/*LSU*/
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
-				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1]);
+				lsu_gpu_v(imagen_h, endmember_bandas_h, deviceSelected, bands, endmember, lines, samples, argv[1], &sclsu);
 			else if(librarySelected == 2){//ClMagma
 				MALLOC_HOST(abundancias_h, double, endmember*lines*samples)
-				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h);
+				lsu_gpu_m(imagen_h, endmember_bandas_h, deviceID, bands, endmember, lines, samples, argv[1], abundancias_h, &sclsu);
 				magma_free_cpu(abundancias_h);
 			}
 			t1 = get_time();
@@ -167,8 +169,36 @@ int main(int argc, char **argv) {
 		default: printf("case not supported, exiting...\n"); exit(-1);
 	}
 	
+	total.init 	+= sga.init + sclsu.init + gene.init;
+	total.transfer 	+= sga.transfer + sclsu.transfer + gene.transfer;
+	total.cpu 	+= sga.cpu + sclsu.cpu + gene.cpu;
+	total.gpu	+= sga.gpu + sclsu.gpu + gene.gpu;
 
+	printf("\n\n----------------------------------------\n");
 
+	double tExeGENE = gene.transfer+gene.gpu+gene.cpu;
+	printf("GENE init:	\t%.3f (seconds)\n", gene.init);
+	printf("\nTotal GENE:	\t%.3f (seconds)\n", tExeGENE);
+	printf(" Transfer:    \t\t%.3f\t(%2.1f%)\n CPU:    \t\t%.3f\t(%2.1f%)\n GPU:    \t\t%.3f\t(%2.1f%)\n",gene.transfer, gene.transfer*100/tExeGENE, gene.cpu, gene.cpu*100/tExeGENE, gene.gpu, gene.gpu*100/tExeGENE);
+	printf("----------------------------------------\n");
+
+	double tExeSGA = sga.transfer+sga.gpu+sga.cpu;
+	printf("SGA init:	\t%.3f (seconds)\n", sga.init);
+	printf("\nTotal SGA:	\t%.3f (seconds)\n", tExeSGA);
+	printf(" Transfer:    \t\t%.3f\t(%2.1f%)\n CPU:    \t\t%.3f\t(%2.1f%)\n GPU:    \t\t%.3f\t(%2.1f%)\n",sga.transfer,sga.transfer*100/tExeSGA, sga.cpu, sga.cpu*100/tExeSGA, sga.gpu, sga.gpu*100/tExeSGA);
+	printf("----------------------------------------\n");
+
+	double tExeSCLSU = sclsu.transfer+sclsu.gpu+sclsu.cpu;
+	printf("SCLSU init:	\t%.3f (seconds)\n", sclsu.init);
+	printf("\nTotal SCLSU:	\t%.3f (seconds)\n", tExeSCLSU);
+	printf(" Transfer:    \t\t%.3f\t(%2.1f%)\n CPU:    \t\t%.3f\t(%2.1f%)\n GPU:    \t\t%.3f\t(%2.1f%)\n",sclsu.transfer, sclsu.transfer*100/tExeSCLSU, sclsu.cpu, sclsu.cpu*100/tExeSCLSU, sclsu.gpu, sclsu.gpu*100/tExeSCLSU);
+	printf("----------------------------------------\n");
+
+	double tExeTotal = total.transfer+total.gpu+total.cpu;
+	printf("Total init:	\t%.3f (seconds)\n", total.init);
+	printf("\nTotal:	\t\t%.3f (seconds)\n", tExeTotal);
+	printf(" Transfer:    \t\t%.3f\t(%2.1f%)\n CPU:    \t\t%.3f\t(%2.1f%)\n GPU:    \t\t%.3f\t(%2.1f%)\n",total.transfer, total.transfer*100/tExeTotal, total.cpu, total.cpu*100/tExeTotal, total.gpu, total.gpu*100/tExeTotal);
+	printf("----------------------------------------\n");
 
 
 

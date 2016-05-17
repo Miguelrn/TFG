@@ -4,6 +4,14 @@
 #include <CL/cl.h>
 #include <stdio.h>
 
+
+typedef struct{
+	double init;
+	double transfer;
+	double gpu;
+	double cpu;
+}tiempo;
+
 void init_OpenCl(cl_context *context, cl_command_queue *command_queue, int deviceSelected, cl_device_id *deviceID);
 
 void exitOnFail(cl_int status, const char* message);
