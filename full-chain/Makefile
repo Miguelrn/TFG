@@ -10,8 +10,8 @@ CL_VFLAGS = -I$(ViennaCl) -lOpenCL -DVIENNACL_WITH_OPENCL
 MAGMADIR     ?= /opt/clmagma-1.3.0
 CUDADIR      ?= /usr/local/cuda-7.5
 OPENBLASDIR  ?= /opt/clBLAS-2.4.0-Linux-x64
-OPENCL_     ?= /opt/intel/opencl-1.2-4.5.0.8
-#OPENCL_	     ?= /opt/intel/opencl-1.2-3.2.1.16712
+#OPENCL_     ?= /opt/intel/opencl-1.2-4.5.0.8
+OPENCL_	     ?= /opt/intel/opencl-1.2-3.2.1.16712
 
 MAGMA_CFLAGS   :=  -DADD_ -I$(MAGMADIR)/include -I$(CUDADIR)/include -I$(OPENBLASDIR)/include
 
@@ -53,7 +53,7 @@ main.o: main.cpp
 	$(CC) $(OPT) -o $@ -c $< $(LIBRARIES) -w -I$(ViennaCl) $(MAGMA_CFLAGS)
 
 full-chain: main.o ReadWrite.o sga.o lsu.o gene.o init_platform.o
-	$(CC) $(OPT) -o $@ $+ $(LIBRARIES) $(MAGMA_LIBS) 
+	$(CC) $(OPT) -o $@ $+ $(LIBRARIES) $(MAGMA_LIBS) -lgsl
 
 clean:
 	rm -f full-chain *.o 

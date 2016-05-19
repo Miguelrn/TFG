@@ -152,6 +152,7 @@ int main(int argc, char **argv) {
 			t1 = get_time();
 
 
+
 			/*LSU*/
 			t0 = get_time();
 			if(librarySelected == 1)//ViennaCl
