@@ -12,7 +12,7 @@ int gene_magma(	double *image,
 		int lines,
 		int bands,
 		int Nmax,
-		int P_FA,
+		double P_FA,
 		cl_device_id deviceID,
 		double *umatrix_Host,
 		tiempo *gene){
@@ -353,6 +353,7 @@ int gene_magma(	double *image,
 	//---------------------------------------//
 	// Launch the ATGP algorithm to find i-1 targets (the first target is already available)
 	while((r_to_inf <= P_FA) && (i < Nmax)){
+	    //(r_to_inf <= P_FA) && (i < Nmax)
 
 		t0 = magma_sync_wtime(queue);
 		UtxU(umatrix_Host, mul_umatrix_Host, i, Nmax);
@@ -411,6 +412,7 @@ int gene_magma(	double *image,
 			t0 = magma_sync_wtime(queue);//calcular el r_to_inf con el test de newman person
 			r_to_inf = GENE_NP_test(theta_Host, Nmax, i, umatrix_Host, endmember_Host, rw_small_Host);
 			gene->cpu += magma_sync_wtime(queue)-t0;
+			printf("%f \n",r_to_inf);
 		
 		}
 		if (r_to_inf <= P_FA){

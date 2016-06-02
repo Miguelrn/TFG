@@ -36,7 +36,7 @@ int main(int argc, char **argv) {
 	int linesEnd, samplesEnd, bandsEnd, datatypeEnd;
 
 	int endmember = 19, error, deviceSelected, librarySelected = 0, maxEndmembers;
-	float probFail;
+	double probFail;
 	size_t localSize;
 	pos *solucion;
 
