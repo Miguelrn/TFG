@@ -488,7 +488,7 @@ int gene_magma(	double *image,
 	free(wo);
 	free(ipiv);
 
-	return i-1;//guardamos el max numero de endmembers para SCLSU
+	return i;//guardamos el max numero de endmembers para SCLSU
 }
 
 

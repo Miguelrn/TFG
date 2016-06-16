@@ -1,7 +1,7 @@
 
 __global double calculaVolumen(__local double *jointpoint_local, double *endmember_vector, int n, int factorial);
 
-#define size 31
+#define size 50
 
 
 

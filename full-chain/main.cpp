@@ -111,7 +111,7 @@ int main(int argc, char **argv) {
 			t0 = get_time();
 			solucion = sga_gpu(imagen_h, endmember, samples, lines, bands, endmember_bandas_h, localSize, context, command_queue, &sga);
 			t1 = get_time();
-			//for(i = 0; i < endmember; i++) printf("%2d: %d - %d\n",i+1,solucion[i].filas, solucion[i].columnas);
+			
 			
 			break;
 
